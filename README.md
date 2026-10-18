@@ -12,6 +12,18 @@ An early academic prototype for analysing single-person, side-view squat videos 
 
 Work in progress. Real exercise-video accuracy has not been validated. The initial synthetic-video smoke test contained no person detections; it verifies output generation, not squat-counting accuracy. Reviewed regression tests cover side reselection, missing-confidence rejection, native float32 pose data, tracking gaps, and incomplete-video/error reporting. This prototype does not assess medical safety or provide validated form correction.
 
+## Training roadmap
+
+The planned training stage is **fine-tuning YOLO pose on public exercise data**, starting from pretrained weights. The current implementation is the pretrained baseline; no exercise-specific fine-tuning has been completed yet.
+
+1. Verify dataset access, usage terms, body-joint definitions, and sample annotations.
+2. Convert compatible labels to YOLO pose format without inventing missing joints; split by subject/source to reduce leakage.
+3. Prepare a CUDA-enabled training environment, targeting a 6 GB GPU initially, and run a tiny training sanity check.
+4. Fine-tune and compare with the original checkpoint on the same held-out labeled images and separate squat videos.
+5. Extend posture feedback and explanations for uncounted attempts; these are separate from joint-localization training.
+
+Dataset choice, conversion, and training settings are still under review. Reuse public code and data where terms permit, retaining attribution and evaluating actual outcomes.
+
 ## Run the tests
 
 From the repository root:
