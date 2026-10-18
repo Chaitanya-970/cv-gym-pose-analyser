@@ -32,6 +32,13 @@ class TestAttemptExports(unittest.TestCase):
             else:run_pipeline(source,out,CounterConfig(),model_name=model)
             with (out/'angles.csv').open(newline='', encoding='utf-8') as stream:
                 rows=list(csv.DictReader(stream))
+            posture=json.loads((out/'posture_summary.json').read_text())
+            attempts=json.loads((out/'attempts.json').read_text())
+            self.assertEqual(posture['summary']['total_attempt_events'],len(attempts['events']))
+            for metric in posture['events']:
+                for key in ('torso','hip'):
+                    value=metric[key]
+                    self.assertEqual(value['measured_count']+sum(value['unavailable_reasons'].values()),value['total_frames'])
             return (json.loads((out/'summary.json').read_text()),
                     json.loads((out/'attempts.json').read_text()), rows)
 
@@ -47,6 +54,8 @@ class TestAttemptExports(unittest.TestCase):
     def test_counted_cycle_matches_counter_and_summary(self):
         summary,report,rows=self.run_case([165]*3+[145,130,100,95,90]+[165]*3)
         self.assertEqual(summary['completed_reps'],1)
+        self.assertEqual(summary['per_attempt_posture']['counted_events'],1)
+        self.assertTrue(summary['output_paths']['posture_summary_json'].endswith('posture_summary.json'))
         self.assertEqual(report['counted_attempts'],1)
         self.assertEqual(report['uncounted_attempts'],0)
         self.assertEqual(rows[-1]['last_attempt_reason'],'completed_cycle')
