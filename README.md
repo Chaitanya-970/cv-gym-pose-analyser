@@ -10,7 +10,18 @@ An early academic prototype for analysing single-person, side-view squat videos 
 
 ## Status
 
-Work in progress. Real exercise-video accuracy has not been validated. The initial synthetic-video smoke test contained no person detections; it verifies output generation, not squat-counting accuracy. Reviewed regression tests cover side reselection, missing-confidence rejection, native float32 pose data, tracking gaps, and incomplete-video/error reporting. This prototype does not assess medical safety or provide validated form correction.
+Work in progress. Total repetition counts match user-reported counts on two initial real clips; general accuracy and posture feedback have not been validated. The initial synthetic-video smoke test contained no person detections; it verifies output generation, not squat-counting accuracy. Reviewed regression tests cover side reselection, missing-confidence rejection, native float32 pose data, tracking gaps, and incomplete-video/error reporting. This prototype does not assess medical safety or provide validated form correction.
+
+## Initial real-video count checks
+
+The pretrained baseline was compared with counts supplied by the human project owner:
+
+| Clip | Human count | Model count |
+| --- | ---: | ---: |
+| [Barbell squat demonstration](https://commons.wikimedia.org/wiki/File:Squat_-_exercise_demonstration_video.webm) (FitnessScape) | 2 | 2 |
+| [Side-view kettlebell squats](https://commons.wikimedia.org/wiki/File:Kettlebell_Racked_Squats_(side_view).webm) (Taco fleur) | 6 | 6 |
+
+Both clip totals match. These are two exploratory examples, not an estimate of general accuracy, rep-event precision, keypoint accuracy, or posture correctness. No per-repetition timestamps were labeled. The kettlebell run retains an `incomplete` integrity status because container-reported frame totals differ; independent FFprobe and OpenCV decodes agree on the available frame count. Footage and generated results remain local and excluded from Git. These clips should remain outside training for future baseline comparisons.
 
 ## Training roadmap
 
