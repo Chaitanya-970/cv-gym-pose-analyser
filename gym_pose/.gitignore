@@ -1,0 +1,10 @@
+# Allow only the current application source, tests, and reproducibility docs.
+# All environments, models, videos, plots, CSVs, and run output remain local.
+*
+!/.gitignore
+!/README.md
+!/requirements.txt
+!/gym_analyser/
+!/gym_analyser/*.py
+!/tests/
+!/tests/*.py

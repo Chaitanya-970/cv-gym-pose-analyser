@@ -1,0 +1,6 @@
+# Only the gym application and this ignore policy belong in the repository.
+# Local transcripts, helper scripts, planning documents, and caches stay private.
+/*
+!/.gitignore
+!/gym_pose/
+!/README.md
