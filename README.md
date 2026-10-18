@@ -6,11 +6,11 @@ An early academic prototype for analysing single-person, side-view squat videos 
 
 - Projected 2D knee-angle measurements and threshold-based repetition counting.
 - Annotated video, per-frame CSV, summary JSON, and angle graph exports.
-- Standard-library unit tests for geometry, counting, and output handling.
+- Geometry/counter unit tests plus adapter tests using local generated videos and mocked pose outputs.
 
 ## Status
 
-Work in progress. Real exercise-video accuracy has not been validated. The initial synthetic-video smoke test contained no person detections; it verifies output generation, not squat-counting accuracy. Review has identified remaining issues in side reselection, confidence validation, and incomplete-video/error reporting. This prototype does not assess medical safety or provide validated form correction.
+Work in progress. Real exercise-video accuracy has not been validated. The initial synthetic-video smoke test contained no person detections; it verifies output generation, not squat-counting accuracy. Reviewed regression tests cover side reselection, missing-confidence rejection, native float32 pose data, tracking gaps, and incomplete-video/error reporting. This prototype does not assess medical safety or provide validated form correction.
 
 ## Run the tests
 
@@ -18,11 +18,11 @@ From the repository root:
 
 ```powershell
 cd gym_pose
-python -m unittest discover -s tests -p "test_*.py" -v
+python -m unittest tests.test_geometry tests.test_counter -v
 python -m gym_analyser --help
 ```
 
-The core tests and command-line help do not require model weights or inference dependencies. For inference setup and output descriptions, see [the application README](gym_pose/README.md). Run module commands from `gym_pose/`.
+The geometry/counter tests and command-line help do not require inference dependencies. The full adapter suite requires the packages in requirements.txt; run `.\.venv\Scripts\python.exe -m unittest discover -s tests -p "test_*.py" -v` after setup. For inference setup and output descriptions, see [the application README](gym_pose/README.md). Run module commands from `gym_pose/`.
 
 ## Repository contents
 

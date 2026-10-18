@@ -4,6 +4,7 @@ import math
 import unittest
 
 from gym_analyser.counter import CounterConfig, SquatCounter
+from gym_analyser.geometry import evaluate_leg
 
 
 def make_pose(
@@ -32,7 +33,7 @@ def make_pose(
         rad = math.radians(right_angle)
         ankle = (
             200.0 + 50.0 * math.sin(rad),
-            200.0 - 50.0 * math.cos(rad),
+            100.0 - 50.0 * math.cos(rad),
             right_conf,
         )
         kpts[12] = hip
@@ -333,6 +334,28 @@ class TestSquatCounter(unittest.TestCase):
         self.assertIn("track_id_mismatch", res.reason)
         self.assertEqual(res.completed_reps, 0)
 
+    def test_00_make_pose_angle_verification(self):
+        """Independently verify requested left and right angles 90 and 170 against geometry.evaluate_leg."""
+        # Left leg tests
+        v_l90, a_l90, c_l90, r_l90 = evaluate_leg(make_pose(left_angle=90.0), "left")
+        self.assertTrue(v_l90)
+        self.assertAlmostEqual(a_l90, 90.0, places=4)
+        self.assertEqual(r_l90, "ok")
+
+        v_l170, a_l170, c_l170, r_l170 = evaluate_leg(make_pose(left_angle=170.0), "left")
+        self.assertTrue(v_l170)
+        self.assertAlmostEqual(a_l170, 170.0, places=4)
+
+        # Right leg tests (using corrected knee-relative ankle coordinates)
+        v_r90, a_r90, c_r90, r_r90 = evaluate_leg(make_pose(right_angle=90.0), "right")
+        self.assertTrue(v_r90)
+        self.assertAlmostEqual(a_r90, 90.0, places=4)
+        self.assertEqual(r_r90, "ok")
+
+        v_r170, a_r170, c_r170, r_r170 = evaluate_leg(make_pose(right_angle=170.0), "right")
+        self.assertTrue(v_r170)
+        self.assertAlmostEqual(a_r170, 170.0, places=4)
+
     def test_10_bad_thresholds_and_nonmonotonic_timestamps(self):
         """Configuration validation and non-monotonic timestamps raise ValueError."""
         with self.assertRaises(ValueError):
@@ -344,16 +367,182 @@ class TestSquatCounter(unittest.TestCase):
         with self.assertRaises(ValueError):
             CounterConfig(down_angle=110.0, up_angle=190.0)
 
-        with self.assertRaises(ValueError):
-            CounterConfig(stable_frames=0)
-
-        with self.assertRaises(ValueError):
-            CounterConfig(max_gap_seconds=-0.5)
-
         # Non-monotonic timestamp in update
         self.counter.update(0, 1.0, [{"track_id": 1, "keypoints": make_pose(left_angle=160.0)}])
         with self.assertRaises(ValueError):
             self.counter.update(1, 0.8, [{"track_id": 1, "keypoints": make_pose(left_angle=160.0)}])
+
+    def test_11_side_reselection_after_cycle_regression(self):
+        """Regression test for side reselection between completed repetition cycles.
+
+        1. Full left cycle -> reps=1.
+        2. Right-only down for stable_frames -> right-only standing for stable_frames leaves reps=1.
+        3. Next full right down + standing increments reps=2.
+        4. Valid CSV rows report the actual observed side even while arming.
+        """
+        t = 0.0
+        # Phase 1: Complete left cycle
+        for _ in range(3):
+            self.counter.update(0, t, [{"track_id": 1, "keypoints": make_pose(left_angle=170.0)}])
+            t += 0.1
+        self.assertEqual(self.counter.stage, SquatCounter.STAGE_STANDING)
+
+        for _ in range(3):
+            self.counter.update(0, t, [{"track_id": 1, "keypoints": make_pose(left_angle=90.0)}])
+            t += 0.1
+        self.assertEqual(self.counter.stage, SquatCounter.STAGE_LOWERED)
+
+        for _ in range(3):
+            res = self.counter.update(0, t, [{"track_id": 1, "keypoints": make_pose(left_angle=170.0)}])
+            t += 0.1
+        self.assertEqual(res.completed_reps, 1)
+        self.assertEqual(self.counter.stage, SquatCounter.STAGE_STANDING)
+
+        # Phase 2: Right-only crouch appears immediately after left cycle
+        for _ in range(3):
+            res = self.counter.update(0, t, [{"track_id": 1, "keypoints": make_pose(right_angle=90.0)}])
+            t += 0.1
+            self.assertTrue(res.valid)
+            self.assertEqual(res.selected_side, "right")
+        # Crouch on an unarmed side must not transition to LOWERED or count
+        self.assertEqual(self.counter.stage, SquatCounter.STAGE_STANDING)
+        self.assertEqual(res.completed_reps, 1)
+
+        # Phase 3: Right-only standing for stable_frames arms the right side
+        for _ in range(3):
+            res = self.counter.update(0, t, [{"track_id": 1, "keypoints": make_pose(right_angle=170.0)}])
+            t += 0.1
+            self.assertTrue(res.valid)
+            self.assertEqual(res.selected_side, "right")
+        self.assertEqual(self.counter.stage, SquatCounter.STAGE_STANDING)
+        self.assertEqual(self.counter.armed_side, "right")
+        self.assertEqual(res.completed_reps, 1)
+
+        # Phase 4: Full right descent and ascent counts rep 2
+        for _ in range(3):
+            res = self.counter.update(0, t, [{"track_id": 1, "keypoints": make_pose(right_angle=90.0)}])
+            t += 0.1
+            self.assertEqual(res.selected_side, "right")
+        self.assertEqual(self.counter.stage, SquatCounter.STAGE_LOWERED)
+
+        for _ in range(3):
+            res = self.counter.update(0, t, [{"track_id": 1, "keypoints": make_pose(right_angle=170.0)}])
+            t += 0.1
+            self.assertEqual(res.selected_side, "right")
+        self.assertEqual(res.completed_reps, 2)
+        self.assertEqual(self.counter.stage, SquatCounter.STAGE_STANDING)
+
+    def test_12_normal_consecutive_same_side_reps(self):
+        """Consecutive reps on the same side count without discarding cycles."""
+        t = 0.0
+        # Arm left
+        for _ in range(3):
+            self.counter.update(0, t, [{"track_id": 1, "keypoints": make_pose(left_angle=170.0)}])
+            t += 0.1
+
+        # Rep 1
+        for _ in range(3):
+            self.counter.update(0, t, [{"track_id": 1, "keypoints": make_pose(left_angle=90.0)}])
+            t += 0.1
+        for _ in range(3):
+            res = self.counter.update(0, t, [{"track_id": 1, "keypoints": make_pose(left_angle=170.0)}])
+            t += 0.1
+        self.assertEqual(res.completed_reps, 1)
+
+        # Rep 2 on same side
+        for _ in range(3):
+            self.counter.update(0, t, [{"track_id": 1, "keypoints": make_pose(left_angle=90.0)}])
+            t += 0.1
+        for _ in range(3):
+            res = self.counter.update(0, t, [{"track_id": 1, "keypoints": make_pose(left_angle=170.0)}])
+            t += 0.1
+        self.assertEqual(res.completed_reps, 2)
+
+    def test_13_config_type_and_finiteness_validations(self):
+        """CounterConfig rejects non-integer stable_frames, booleans, and non-finite numbers."""
+        with self.assertRaises(TypeError):
+            CounterConfig(stable_frames=1.5)
+
+        with self.assertRaises(TypeError):
+            CounterConfig(stable_frames=True)
+
+        with self.assertRaises(ValueError):
+            CounterConfig(stable_frames=0)
+
+        with self.assertRaises(ValueError):
+            CounterConfig(stable_frames=-3)
+
+        with self.assertRaises(ValueError):
+            CounterConfig(down_angle=float("nan"))
+
+        with self.assertRaises(ValueError):
+            CounterConfig(down_angle=float("inf"))
+
+        with self.assertRaises(ValueError):
+            CounterConfig(up_angle=float("nan"))
+
+        with self.assertRaises(ValueError):
+            CounterConfig(min_joint_confidence=float("nan"))
+
+        with self.assertRaises(ValueError):
+            CounterConfig(min_joint_confidence=float("inf"))
+
+        with self.assertRaises(ValueError):
+            CounterConfig(min_joint_confidence=-0.1)
+
+        with self.assertRaises(ValueError):
+            CounterConfig(min_joint_confidence=1.1)
+
+        with self.assertRaises(ValueError):
+            CounterConfig(max_gap_seconds=float("nan"))
+
+        with self.assertRaises(ValueError):
+            CounterConfig(max_gap_seconds=float("inf"))
+
+        with self.assertRaises(ValueError):
+            CounterConfig(max_gap_seconds=0.0)
+
+        with self.assertRaises(ValueError):
+            CounterConfig(max_gap_seconds=-0.5)
+
+    def test_14_update_timestamp_and_index_validations(self):
+        """SquatCounter.update rejects invalid timestamp and frame index types and values."""
+        dummy_det = [{"track_id": 1, "keypoints": make_pose(left_angle=160.0)}]
+
+        # frame_index validation
+        with self.assertRaises(TypeError):
+            self.counter.update(-1, 0.0, dummy_det)
+
+        with self.assertRaises(TypeError):
+            self.counter.update(True, 0.0, dummy_det)
+
+        with self.assertRaises(TypeError):
+            self.counter.update(1.0, 0.0, dummy_det)
+
+        # video_time_s validation
+        with self.assertRaises(ValueError):
+            self.counter.update(0, float("nan"), dummy_det)
+
+        with self.assertRaises(ValueError):
+            self.counter.update(0, float("inf"), dummy_det)
+
+        with self.assertRaises(ValueError):
+            self.counter.update(0, -0.1, dummy_det)
+
+        with self.assertRaises(ValueError):
+            self.counter.update(0, True, dummy_det)
+
+
+    def test_side_rearming_requires_consecutive_observations(self):
+        """Frames of the old armed side interrupt the new side's standing streak."""
+        counter = SquatCounter()
+        sequence = [(170.0, None)] * 3 + [(90.0, None)] * 3 + [(170.0, None)] * 3
+        sequence += [(None, 170.0)] * 2 + [(170.0, None)] + [(None, 170.0)]
+        sequence += [(None, 90.0)] * 3 + [(None, 170.0)] * 3
+        for index, (left, right) in enumerate(sequence):
+            result = counter.update(index, index / 30.0,
+                [{"track_id": 1, "keypoints": make_pose(left_angle=left, right_angle=right)}])
+        self.assertEqual(result.completed_reps, 1)
 
 
 if __name__ == "__main__":

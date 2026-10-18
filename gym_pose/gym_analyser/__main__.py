@@ -94,7 +94,7 @@ def main() -> None:
             stable_frames=args.stable_frames,
             max_gap_seconds=args.max_gap,
         )
-    except ValueError as e:
+    except (ValueError, TypeError) as e:
         sys.stderr.write(f"Configuration error: {e}\n")
         sys.exit(1)
 
@@ -111,7 +111,11 @@ def main() -> None:
             tracker=args.tracker,
             overwrite=args.overwrite,
         )
-        print(f"Processing completed successfully.")
+        if summary.get("status") != "completed":
+            sys.stderr.write(f"Processing ended with non-completed status '{summary.get('status')}': {summary.get('read_status_note', '')}\n")
+            sys.exit(1)
+
+        print("Processing completed successfully.")
         print(f"Processed frames: {summary['processed_frames']}")
         print(f"Completed repetitions: {summary['completed_reps']}")
         print(f"Outputs written to: {args.output_dir}")

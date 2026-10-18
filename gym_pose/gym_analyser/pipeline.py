@@ -6,9 +6,10 @@ import math
 import os
 import sys
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from .counter import CounterConfig, FrameResult, SquatCounter
+from .geometry import COCO_PAIRS
 
 
 def export_csv(results: List[FrameResult], csv_path: Path) -> None:
@@ -67,7 +68,6 @@ def export_angle_plot(
     plot_path: Path,
 ) -> None:
     """Generate a knee angle time-series plot preserving missing data gaps."""
-    # Delayed import of matplotlib
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -109,6 +109,83 @@ def export_angle_plot(
     fig.tight_layout()
     fig.savefig(plot_path)
     plt.close(fig)
+
+
+def draw_knee_overlay(
+    frame: Any,
+    keypoints: Sequence[Sequence[float]],
+    selected_side: Optional[str],
+    knee_angle_deg: Optional[float],
+) -> None:
+    """Draw knee angle arc, highlighted limb segments, and angle label on the frame."""
+    if selected_side not in COCO_PAIRS or knee_angle_deg is None:
+        return
+    if not math.isfinite(knee_angle_deg):
+        return
+
+    import cv2
+
+    hip_idx, knee_idx, ankle_idx = COCO_PAIRS[selected_side]
+    if len(keypoints) <= max(hip_idx, knee_idx, ankle_idx):
+        return
+
+    hip = keypoints[hip_idx]
+    knee = keypoints[knee_idx]
+    ankle = keypoints[ankle_idx]
+
+    kx, ky = int(round(knee[0])), int(round(knee[1]))
+    hx, hy = int(round(hip[0])), int(round(hip[1]))
+    ax, ay = int(round(ankle[0])), int(round(ankle[1]))
+
+    # Highlight limb segments on the selected side
+    limb_color = (0, 255, 255)  # Yellow
+    cv2.line(frame, (hx, hy), (kx, ky), limb_color, 3, cv2.LINE_AA)
+    cv2.line(frame, (kx, ky), (ax, ay), limb_color, 3, cv2.LINE_AA)
+    cv2.circle(frame, (kx, ky), 5, (0, 165, 255), -1, cv2.LINE_AA)
+
+    # Calculate angles from knee vertex
+    v1x, v1y = hx - kx, hy - ky
+    v2x, v2y = ax - kx, ay - ky
+
+    len1 = math.hypot(v1x, v1y)
+    len2 = math.hypot(v2x, v2y)
+    if len1 < 5.0 or len2 < 5.0:
+        return
+
+    ang1 = math.degrees(math.atan2(v1y, v1x)) % 360
+    ang2 = math.degrees(math.atan2(v2y, v2x)) % 360
+
+    diff = (ang2 - ang1) % 360
+    if diff <= 180:
+        start_angle, end_angle = ang1, ang1 + diff
+    else:
+        start_angle, end_angle = ang2, ang2 + (360 - diff)
+
+    arc_radius = min(40, max(15, int(min(len1, len2) * 0.4)))
+    cv2.ellipse(
+        frame,
+        (kx, ky),
+        (arc_radius, arc_radius),
+        0,
+        start_angle,
+        end_angle,
+        (0, 255, 0),
+        2,
+        cv2.LINE_AA,
+    )
+
+    # Draw angle text label near the knee
+    label_text = f"{knee_angle_deg:.1f}°"
+    cv2.putText(
+        frame,
+        label_text,
+        (kx + 10, ky - 10),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.55,
+        (255, 255, 255),
+        2,
+        cv2.LINE_AA,
+    )
 
 
 def draw_hud(
@@ -153,13 +230,13 @@ def run_pipeline(
     source_path: Path,
     output_dir: Path,
     config: CounterConfig,
-    model_name: str = "yolo11n-pose.pt",
+    model_name: Any = "yolo11n-pose.pt",
     device: str = "cpu",
     tracker: str = "bytetrack.yaml",
     overwrite: bool = False,
 ) -> Dict[str, Any]:
-    """Execute complete video analysis pipeline."""
-    # 1. Input and output path validation (pure standard library)
+    """Execute complete video analysis pipeline with explicit lifecycle and error reporting."""
+    # 1. Input and output path validation
     source_path = source_path.resolve()
     output_dir = output_dir.resolve()
 
@@ -175,59 +252,84 @@ def run_pipeline(
             raise FileExistsError(
                 f"Output directory {output_dir} is not empty. Use --overwrite to permit overwriting."
             )
+
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # 2. Open input video capture
-    import cv2
-
-    cap = cv2.VideoCapture(str(source_path))
-    if not cap.isOpened():
-        raise IOError(f"Failed to open video source: {source_path}")
-
-    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    fps = cap.get(cv2.CAP_PROP_FPS)
-    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-
-    if fps <= 0.0 or not math.isfinite(fps):
-        cap.release()
-        raise ValueError(f"Invalid video FPS: {fps}")
-
-    if width <= 0 or height <= 0:
-        cap.release()
-        raise ValueError(f"Invalid video dimensions: {width}x{height}")
-
-    duration_s = total_frames / fps if total_frames > 0 else 0.0
-
-    # 3. Setup output paths
+    # Setup artifact paths
     out_video_path = output_dir / "annotated.mp4"
     out_csv_path = output_dir / "angles.csv"
     out_summary_path = output_dir / "summary.json"
     out_plot_path = output_dir / "angle_plot.png"
 
-    # 4. Open video writer
-    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-    writer = cv2.VideoWriter(str(out_video_path), fourcc, fps, (width, height))
-    if not writer.isOpened():
-        cap.release()
-        raise IOError(f"Failed to open VideoWriter for path: {out_video_path}")
+    # Purge stale files from earlier runs when overwrite is permitted
+    if overwrite:
+        for stale_path in (out_video_path, out_csv_path, out_summary_path, out_plot_path):
+            if stale_path.exists():
+                try:
+                    stale_path.unlink()
+                except OSError:
+                    pass
 
-    # 5. Load model
-    from ultralytics import YOLO
-
-    try:
-        model = YOLO(model_name)
-    except Exception as e:
-        cap.release()
-        writer.release()
-        raise RuntimeError(f"Failed to load YOLO pose model '{model_name}': {e}") from e
-
-    counter = SquatCounter(config)
+    # Lifecycle resources
+    cap = None
+    writer = None
     results: List[FrameResult] = []
     frame_idx = 0
     valid_count = 0
+    counter = SquatCounter(config)
+
+    fps = 0.0
+    width = 0
+    height = 0
+    declared_frame_count = 0
+    is_incomplete = False
 
     try:
+        import cv2
+
+        # 2. Open input video capture
+        cap = cv2.VideoCapture(str(source_path))
+        if not cap.isOpened():
+            raise IOError(f"Failed to open video source: {source_path}")
+
+        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        declared_frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+
+        if fps <= 0.0 or not math.isfinite(fps):
+            raise ValueError(f"Invalid video FPS: {fps}")
+
+        if width <= 0 or height <= 0:
+            raise ValueError(f"Invalid video dimensions: {width}x{height}")
+
+        # 3. Open video writer
+        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+        writer = cv2.VideoWriter(str(out_video_path), fourcc, fps, (width, height))
+        if not writer.isOpened():
+            raise IOError(f"Failed to open VideoWriter for path: {out_video_path}")
+
+        # 4. Load and validate pose model
+        if isinstance(model_name, (str, Path)):
+            from ultralytics import YOLO
+
+            try:
+                model = YOLO(str(model_name))
+            except Exception as e:
+                raise RuntimeError(f"Failed to load YOLO pose model '{model_name}': {e}") from e
+            actual_model_name = str(model_name)
+        else:
+            model = model_name
+            actual_model_name = type(model_name).__name__
+
+        # Enforce model task validation
+        model_task = getattr(model, "task", None)
+        if model_task != "pose":
+            raise ValueError(
+                f"Unsupported model task '{model_task}'. A pose estimation model with task='pose' is required."
+            )
+
+        # 5. Process video frames
         while True:
             ret, frame = cap.read()
             if not ret or frame is None:
@@ -247,9 +349,25 @@ def run_pipeline(
             detections: List[Dict[str, Any]] = []
             if track_results and len(track_results) > 0:
                 res0 = track_results[0]
-                if res0.keypoints is not None and res0.boxes is not None:
+                if res0.boxes is not None and res0.keypoints is not None:
                     kpt_data = res0.keypoints.data.cpu().numpy()
                     box_ids = res0.boxes.id
+
+                    # If instances are detected, validate tensor shape and channels
+                    if len(kpt_data) > 0:
+                        if kpt_data.ndim != 3 or kpt_data.shape[1] != 17:
+                            raise ValueError(
+                                f"Unsupported keypoint layout: expected 17 keypoints (COCO-17), but received shape {kpt_data.shape}"
+                            )
+                        if kpt_data.shape[2] < 3:
+                            raise ValueError(
+                                f"Keypoint tensor has {kpt_data.shape[2]} channels; expected at least 3 channels (x, y, confidence)"
+                            )
+                        if box_ids is not None and len(box_ids) != len(kpt_data):
+                            raise ValueError(
+                                f"Mismatch between detected keypoint count ({len(kpt_data)}) and bounding box track IDs ({len(box_ids)})"
+                            )
+
                     ids = (
                         box_ids.int().cpu().tolist()
                         if box_ids is not None
@@ -258,7 +376,12 @@ def run_pipeline(
                     for kpts, tid in zip(kpt_data, ids):
                         detections.append({"track_id": tid, "keypoints": kpts})
 
-            # Update counter
+                elif res0.boxes is not None and len(res0.boxes) > 0 and res0.keypoints is None:
+                    raise ValueError(
+                        "Model detected bounding boxes without keypoints. A pose estimation model is required."
+                    )
+
+            # Update repetition counter
             result = counter.update(
                 frame_index=frame_idx,
                 video_time_s=video_time_s,
@@ -268,68 +391,159 @@ def run_pipeline(
             if result.valid:
                 valid_count += 1
 
-            # Render annotations and HUD
+            # Render frame annotations
             if track_results and len(track_results) > 0:
                 plot_frame = track_results[0].plot(boxes=False)
             else:
                 plot_frame = frame.copy()
 
+            # Draw knee angle arc and limb highlight if valid
+            if result.valid and result.selected_side and detections:
+                active_det = next(
+                    (d for d in detections if d.get("track_id") == result.track_id),
+                    detections[0],
+                )
+                draw_knee_overlay(
+                    plot_frame,
+                    active_det["keypoints"],
+                    result.selected_side,
+                    result.knee_angle_deg,
+                )
+
             draw_hud(plot_frame, result, config)
             writer.write(plot_frame)
             frame_idx += 1
 
+        # 6. Validate read results
+        if frame_idx == 0:
+            raise RuntimeError(f"No readable video frames could be decoded from {source_path}")
+
+        declared_frames = declared_frame_count if declared_frame_count > 0 else None
+        declared_duration_s = round(declared_frames / fps, 2) if declared_frames is not None else None
+        processed_duration_s = round(frame_idx / fps, 2)
+
+        if declared_frames is not None and frame_idx < declared_frames:
+            is_incomplete = True
+            status = "incomplete"
+            read_note = (
+                f"Container declared {declared_frames} frames, but only {frame_idx} frames were successfully decoded. "
+                "OpenCV VideoCapture cannot determine whether early termination was caused by a codec/decode failure or inaccurate container metadata."
+            )
+        else:
+            is_incomplete = False
+            status = "completed"
+            read_note = (
+                f"Successfully processed all {frame_idx} decoded frames. "
+                + (
+                    f"Container metadata declared {declared_frames} frames."
+                    if declared_frames is not None
+                    else "Container provided no declared frame count metadata."
+                )
+            )
+
+        # Export CSV and Plot
+        export_csv(results, out_csv_path)
+        export_angle_plot(results, config, out_plot_path)
+
+        valid_fraction = valid_count / frame_idx if frame_idx > 0 else 0.0
+
+        import ultralytics
+        summary = {
+            "status": status,
+            "model_name": actual_model_name,
+            "read_status_note": read_note,
+            "package_versions": {
+                "python": sys.version.split()[0],
+                "ultralytics": ultralytics.__version__ if "ultralytics" in sys.modules else "unknown",
+                "opencv": cv2.__version__,
+            },
+            "configuration": {
+                "down_angle": config.down_angle,
+                "up_angle": config.up_angle,
+                "min_joint_confidence": config.min_joint_confidence,
+                "stable_frames": config.stable_frames,
+                "max_gap_seconds": config.max_gap_seconds,
+                "tracker": tracker,
+                "device": device,
+            },
+            "source_video": {
+                "path": str(source_path),
+                "declared_frame_count": declared_frames,
+                "declared_duration_s": declared_duration_s,
+                "fps": fps,
+                "width": width,
+                "height": height,
+            },
+            "processed_frames": frame_idx,
+            "processed_duration_s": processed_duration_s,
+            "valid_observations": valid_count,
+            "valid_observation_fraction": round(valid_fraction, 4),
+            "completed_reps": counter.completed_reps,
+            "output_paths": {
+                "annotated_video": str(out_video_path),
+                "angles_csv": str(out_csv_path),
+                "summary_json": str(out_summary_path),
+                "angle_plot": str(out_plot_path),
+            },
+            "limitations": [
+                "Projected 2D joint angles, not calibrated 3D anatomical angles.",
+                "Repetition counts reflect threshold transitions, not validated clinical accuracy.",
+                "Assumes a stationary camera with a clear side profile of a single person.",
+            ],
+        }
+
+        export_summary(summary, out_summary_path)
+
+        if is_incomplete:
+            raise RuntimeError(f"Processing ended early: {read_note}")
+
+        return summary
+
+    except Exception as exc:
+        # Preserve partial CSV if any frames were processed
+        if results:
+            try:
+                export_csv(results, out_csv_path)
+            except Exception:
+                pass
+
+        # Write failed summary if not already written as incomplete
+        if not is_incomplete or not out_summary_path.exists():
+            fail_summary = {
+                "status": "failed",
+                "error": f"{type(exc).__name__}: {str(exc)}",
+                "model_name": actual_model_name if "actual_model_name" in locals() else str(model_name),
+                "processed_frames": frame_idx,
+                "processed_duration_s": round(frame_idx / fps, 2) if fps > 0 else 0.0,
+                "completed_reps": counter.completed_reps,
+                "source_video": {
+                    "path": str(source_path),
+                    "declared_frame_count": declared_frame_count if declared_frame_count > 0 else None,
+                    "fps": fps if fps > 0 else None,
+                    "width": width if width > 0 else None,
+                    "height": height if height > 0 else None,
+                },
+                "output_paths": {
+                    "annotated_video": str(out_video_path) if out_video_path.exists() else None,
+                    "angles_csv": str(out_csv_path) if out_csv_path.exists() else None,
+                    "summary_json": str(out_summary_path),
+                    "angle_plot": str(out_plot_path) if out_plot_path.exists() else None,
+                },
+                "limitations": [
+                    "Projected 2D joint angles, not calibrated 3D anatomical angles.",
+                    "Repetition counts reflect threshold transitions, not validated clinical accuracy.",
+                    "Assumes a stationary camera with a clear side profile of a single person.",
+                ],
+            }
+            try:
+                export_summary(fail_summary, out_summary_path)
+            except Exception:
+                pass
+
+        raise
+
     finally:
-        cap.release()
-        writer.release()
-
-    # 6. Save data artifacts
-    export_csv(results, out_csv_path)
-    export_angle_plot(results, config, out_plot_path)
-
-    valid_fraction = valid_count / frame_idx if frame_idx > 0 else 0.0
-
-    import ultralytics
-    summary = {
-        "status": "completed",
-        "model_name": model_name,
-        "package_versions": {
-            "python": sys.version.split()[0],
-            "ultralytics": ultralytics.__version__,
-            "opencv": cv2.__version__,
-        },
-        "configuration": {
-            "down_angle": config.down_angle,
-            "up_angle": config.up_angle,
-            "min_joint_confidence": config.min_joint_confidence,
-            "stable_frames": config.stable_frames,
-            "max_gap_seconds": config.max_gap_seconds,
-            "tracker": tracker,
-            "device": device,
-        },
-        "source_video": {
-            "path": str(source_path),
-            "frame_count": frame_idx,
-            "fps": fps,
-            "duration_s": round(duration_s, 2),
-            "width": width,
-            "height": height,
-        },
-        "processed_frames": frame_idx,
-        "valid_observations": valid_count,
-        "valid_observation_fraction": round(valid_fraction, 4),
-        "completed_reps": counter.completed_reps,
-        "output_paths": {
-            "annotated_video": str(out_video_path),
-            "angles_csv": str(out_csv_path),
-            "summary_json": str(out_summary_path),
-            "angle_plot": str(out_plot_path),
-        },
-        "limitations": [
-            "Projected 2D joint angles, not calibrated 3D anatomical angles.",
-            "Repetition counts reflect threshold transitions, not validated clinical accuracy.",
-            "Assumes a stationary camera with a clear side profile of a single person.",
-        ],
-    }
-
-    export_summary(summary, out_summary_path)
-    return summary
+        if cap is not None:
+            cap.release()
+        if writer is not None:
+            writer.release()

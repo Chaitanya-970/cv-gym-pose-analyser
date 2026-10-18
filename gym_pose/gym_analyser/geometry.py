@@ -1,6 +1,7 @@
 """Geometric calculations for 2D human pose keypoints."""
 
 import math
+from numbers import Real
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 LEFT_HIP = 11
@@ -25,8 +26,8 @@ def calculate_angle(
     """Calculate the 2D projected joint angle at vertex b between points a and c.
 
     Points must contain at least x and y coordinates.
-    Returns angle in degrees [0.0, 180.0], or None if inputs are non-finite
-    or form zero-length vectors.
+    Returns angle in degrees [0.0, 180.0], or None if inputs are non-finite,
+    invalid types, or form zero-length vectors.
     """
     if len(a) < 2 or len(b) < 2 or len(c) < 2:
         return None
@@ -36,7 +37,11 @@ def calculate_angle(
     cx, cy = c[0], c[1]
 
     for val in (ax, ay, bx, by, cx, cy):
-        if not math.isfinite(val):
+        if (
+            isinstance(val, bool)
+            or not isinstance(val, Real)
+            or not math.isfinite(val)
+        ):
             return None
 
     v1x = ax - bx
@@ -56,11 +61,20 @@ def calculate_angle(
 
 
 def extract_confidence(point: Sequence[float]) -> Optional[float]:
-    """Extract and validate the confidence score from a point tuple."""
+    """Extract and validate the confidence score from a point tuple.
+
+    Points without an explicit confidence score are rejected.
+    """
     if len(point) < 3:
-        return 1.0
+        return None
     conf = point[2]
-    if not math.isfinite(conf) or conf < 0.0 or conf > 1.0:
+    if (
+        isinstance(conf, bool)
+        or not isinstance(conf, Real)
+        or not math.isfinite(conf)
+        or conf < 0.0
+        or conf > 1.0
+    ):
         return None
     return float(conf)
 
@@ -92,7 +106,7 @@ def evaluate_leg(
     c_ankle = extract_confidence(ankle)
 
     if c_hip is None or c_knee is None or c_ankle is None:
-        return False, None, None, "invalid_confidence_value"
+        return False, None, None, "missing_or_invalid_confidence"
 
     min_conf = min(c_hip, c_knee, c_ankle)
     if min_conf < min_confidence:

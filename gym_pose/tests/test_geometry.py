@@ -69,16 +69,37 @@ class TestGeometry(unittest.TestCase):
         self.assertIsNone(calculate_angle((100.0, 50.0), (float("-inf"), 100.0), ankle))
 
     def test_confidence_validation(self):
-        """Confidence score extraction boundaries."""
-        self.assertEqual(extract_confidence((10.0, 20.0)), 1.0)
+        """Confidence score extraction boundaries and rejections."""
+        # Points without explicit confidence must be rejected (return None)
+        self.assertIsNone(extract_confidence((10.0, 20.0)))
         self.assertEqual(extract_confidence((10.0, 20.0, 0.85)), 0.85)
         self.assertIsNone(extract_confidence((10.0, 20.0, -0.1)))
         self.assertIsNone(extract_confidence((10.0, 20.0, 1.2)))
         self.assertIsNone(extract_confidence((10.0, 20.0, float("nan"))))
+        self.assertIsNone(extract_confidence((10.0, 20.0, float("inf"))))
+        self.assertIsNone(extract_confidence((10.0, 20.0, True)))
+        self.assertIsNone(extract_confidence((10.0, 20.0, "0.85")))
+
+    def test_calculate_angle_types_and_finiteness(self):
+        """Invalid types, booleans, and non-finite inputs return None."""
+        knee = (100.0, 100.0)
+        ankle = (100.0, 150.0)
+        self.assertIsNone(calculate_angle((True, 50.0), knee, ankle))
+        self.assertIsNone(calculate_angle(("100.0", 50.0), knee, ankle))
+        self.assertIsNone(calculate_angle((100.0, 50.0), knee, (100.0, None)))
+
+    def test_evaluate_leg_missing_confidence(self):
+        """Keypoints missing confidence dimension are rejected."""
+        # 17 keypoints with only (x, y) coordinates
+        kpts_2d = [(100.0, 100.0)] * 17
+        valid, angle, conf, reason = evaluate_leg(kpts_2d, "left")
+        self.assertFalse(valid)
+        self.assertIsNone(angle)
+        self.assertEqual(reason, "missing_or_invalid_confidence")
 
     def test_evaluate_leg_missing_indices(self):
         """Incomplete keypoint lists must be rejected."""
-        short_kpts = [(0.0, 0.0)] * 10
+        short_kpts = [(0.0, 0.0, 0.9)] * 10
         valid, angle, conf, reason = evaluate_leg(short_kpts, "left")
         self.assertFalse(valid)
         self.assertIsNone(angle)

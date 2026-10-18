@@ -1,5 +1,6 @@
 """Repetition counting state machine for squat exercises."""
 
+import math
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -17,18 +18,30 @@ class CounterConfig:
     max_gap_seconds: float = 0.5
 
     def __post_init__(self) -> None:
+        # Validate stable_frames type and range
+        if isinstance(self.stable_frames, bool) or not isinstance(self.stable_frames, int):
+            raise TypeError("stable_frames must be an integer, not float or bool")
+        if self.stable_frames < 1:
+            raise ValueError(f"Invalid stable_frames: {self.stable_frames} (must be >= 1)")
+
+        # Validate finiteness of numeric parameters
+        for name, val in [
+            ("down_angle", self.down_angle),
+            ("up_angle", self.up_angle),
+            ("min_joint_confidence", self.min_joint_confidence),
+            ("max_gap_seconds", self.max_gap_seconds),
+        ]:
+            if isinstance(val, bool) or not isinstance(val, (int, float)) or not math.isfinite(val):
+                raise ValueError(f"{name} must be a finite number")
+
         if not (0.0 < self.down_angle < self.up_angle < 180.0):
             raise ValueError(
                 f"Invalid angle thresholds: 0 < down ({self.down_angle}) < "
                 f"up ({self.up_angle}) < 180 required"
             )
-        if self.min_joint_confidence < 0.0 or self.min_joint_confidence > 1.0:
+        if not (0.0 <= self.min_joint_confidence <= 1.0):
             raise ValueError(
                 f"Invalid min_joint_confidence: {self.min_joint_confidence} (must be in [0, 1])"
-            )
-        if self.stable_frames < 1:
-            raise ValueError(
-                f"Invalid stable_frames: {self.stable_frames} (must be >= 1)"
             )
         if self.max_gap_seconds <= 0.0:
             raise ValueError(
@@ -64,10 +77,12 @@ class SquatCounter:
         self.stage = self.STAGE_UNKNOWN
         self.completed_reps = 0
         self.locked_side: Optional[str] = None
+        self.armed_side: Optional[str] = None
         self.locked_track_id: Optional[int] = None
 
         self.standing_streak = 0
         self.lowered_streak = 0
+        self.current_candidate_side: Optional[str] = None
 
         self.last_timestamp_s: Optional[float] = None
         self.last_valid_time_s: Optional[float] = None
@@ -76,6 +91,8 @@ class SquatCounter:
         """Reset partial repetition state while preserving completed reps."""
         self.stage = self.STAGE_UNKNOWN
         self.locked_side = None
+        self.armed_side = None
+        self.current_candidate_side = None
         self.standing_streak = 0
         self.lowered_streak = 0
 
@@ -88,9 +105,26 @@ class SquatCounter:
         """Process a frame with a list of detections.
 
         Each detection dictionary must have:
-        - 'keypoints': Sequence of (x, y) or (x, y, conf) keypoints
+        - 'keypoints': Sequence of (x, y, conf) keypoints
         - 'track_id': Optional[int] tracking identifier
         """
+        # Validate frame_index type and range
+        if (
+            isinstance(frame_index, bool)
+            or not isinstance(frame_index, int)
+            or frame_index < 0
+        ):
+            raise TypeError(f"Invalid frame_index {frame_index}: must be a non-negative integer")
+
+        # Validate timestamp type and finiteness
+        if (
+            isinstance(video_time_s, bool)
+            or not isinstance(video_time_s, (int, float))
+            or not math.isfinite(video_time_s)
+            or video_time_s < 0.0
+        ):
+            raise ValueError(f"Invalid timestamp {video_time_s}: must be finite non-negative number")
+
         if self.last_timestamp_s is not None and video_time_s < self.last_timestamp_s:
             raise ValueError(
                 f"Non-monotonic timestamp: previous {self.last_timestamp_s}, current {video_time_s}"
@@ -105,6 +139,7 @@ class SquatCounter:
                 self.stage != self.STAGE_UNKNOWN
                 or self.standing_streak > 0
                 or self.lowered_streak > 0
+                or self.locked_side is not None
             ):
                 self._abandon_cycle()
 
@@ -210,7 +245,7 @@ class SquatCounter:
             frame_index=frame_index,
             video_time_s=video_time_s,
             track_id=self.locked_track_id,
-            selected_side=self.locked_side,
+            selected_side=side,
             knee_angle_deg=angle,
             confidence=conf,
             valid=True,
@@ -223,13 +258,22 @@ class SquatCounter:
         self, keypoints: Sequence[Sequence[float]]
     ) -> Tuple[bool, Optional[float], Optional[float], str, Optional[str]]:
         """Select appropriate side and compute angle."""
-        if self.locked_side is not None:
+        # While locked in LOWERED, only evaluate the locked side
+        if self.stage == self.STAGE_LOWERED and self.locked_side is not None:
             is_valid, angle, conf, reason = evaluate_leg(
                 keypoints, self.locked_side, self.config.min_joint_confidence
             )
             return is_valid, angle, conf, reason, self.locked_side
 
-        # Evaluate both sides to find best candidate
+        # If locked_side is set in STANDING, try locked_side first
+        if self.locked_side is not None:
+            is_valid, angle, conf, reason = evaluate_leg(
+                keypoints, self.locked_side, self.config.min_joint_confidence
+            )
+            if is_valid:
+                return True, angle, conf, "ok", self.locked_side
+
+        # Reselect side based on best confidence
         v_l, a_l, c_l, r_l = evaluate_leg(
             keypoints, "left", self.config.min_joint_confidence
         )
@@ -253,34 +297,65 @@ class SquatCounter:
         """Advance repetition state machine using a validated angle."""
         if self.stage == self.STAGE_UNKNOWN:
             if angle >= self.config.up_angle:
-                self.standing_streak += 1
+                if self.current_candidate_side == observed_side:
+                    self.standing_streak += 1
+                else:
+                    self.current_candidate_side = observed_side
+                    self.standing_streak = 1
+
                 if self.standing_streak >= self.config.stable_frames:
                     self.stage = self.STAGE_STANDING
+                    self.armed_side = observed_side
                     self.locked_side = observed_side
                     self.standing_streak = 0
             else:
                 self.standing_streak = 0
+                self.current_candidate_side = None
 
         elif self.stage == self.STAGE_STANDING:
-            if self.locked_side is None:
+            # Check if observed_side is the armed side
+            if observed_side == self.armed_side:
+                # Observing the armed side interrupts a challenger's standing streak.
+                self.standing_streak = 0
+                self.current_candidate_side = None
                 self.locked_side = observed_side
-
-            if angle <= self.config.down_angle:
-                self.lowered_streak += 1
-                if self.lowered_streak >= self.config.stable_frames:
-                    self.stage = self.STAGE_LOWERED
+                if angle <= self.config.down_angle:
+                    self.lowered_streak += 1
+                    if self.lowered_streak >= self.config.stable_frames:
+                        self.stage = self.STAGE_LOWERED
+                        self.lowered_streak = 0
+                else:
                     self.lowered_streak = 0
             else:
+                # Different side must first provide stable standing observations on its own
                 self.lowered_streak = 0
+                if angle >= self.config.up_angle:
+                    if self.current_candidate_side == observed_side:
+                        self.standing_streak += 1
+                    else:
+                        self.current_candidate_side = observed_side
+                        self.standing_streak = 1
+
+                    if self.standing_streak >= self.config.stable_frames:
+                        self.armed_side = observed_side
+                        self.locked_side = observed_side
+                        self.standing_streak = 0
+                else:
+                    self.standing_streak = 0
+                    self.current_candidate_side = None
 
         elif self.stage == self.STAGE_LOWERED:
+            # While lowered, locked_side is enforced
             if angle >= self.config.up_angle:
                 self.standing_streak += 1
                 if self.standing_streak >= self.config.stable_frames:
                     self.stage = self.STAGE_STANDING
                     self.completed_reps += 1
                     self.standing_streak = 0
-                    # Permit side reselection after fresh standing observation
+                    self.lowered_streak = 0
+                    # Returning side remains armed for consecutive same-side reps
+                    self.armed_side = self.locked_side
+                    # Unlock side so a different side can be selected if needed
                     self.locked_side = None
             else:
                 self.standing_streak = 0

@@ -6,3 +6,4 @@ opencv-python==5.0.0.93
 matplotlib==3.10.9
 numpy==2.2.6
 PyYAML==6.0.3
+lap==0.5.13
