@@ -40,6 +40,16 @@ pip install -r requirements.txt
 
 Installing PyTorch with the CPU index avoids accidentally downloading large CUDA runtime binaries on machines without GPU requirements. Pinned dependencies include `lap==0.5.13` for reproducible ByteTrack association.
 
+### Optional dependencies for dataset conversion
+
+Parsing original Penn Action MATLAB (`.mat`) annotations requires `scipy`:
+
+```powershell
+pip install scipy==1.15.3
+```
+
+`scipy` is imported only by `gym_analyser.penn_converter.load_penn_mat`. The core geometry, hysteresis counter, and standard tests continue to run without `scipy` using standard library Python (`python -S`).
+
 ### Running unit tests
 
 Deterministic unit and adapter tests run locally without downloading models:
@@ -99,6 +109,26 @@ cd gym_pose
     --overwrite
 ```
 
+### Convert Penn Action dataset to YOLO pose format
+
+```powershell
+cd gym_pose
+.\.venv\Scripts\python.exe -m gym_analyser.penn_converter `
+    --source-dir <penn_action_root> `
+    --output-dir <fresh_empty_yolo_dir> `
+    --action squats `
+    --stride 5
+```
+
+The converter verifies bounding box and keypoint bounds, masks unannotated facial landmarks (COCO 0-4) and out-of-frame coordinates as `(0.000000, 0.000000, 0)`, maps 12 body joints to COCO-17 indices 5-16, protects native test sequences from entering training or validation, and strictly refuses non-empty output directories to prevent accidental deletion of user data.
+
+The archive uses action `squat`; the CLI also accepts `squats`. The loader translates MATLAB one-based coordinates to zero-based image coordinates, following the author's `CreatePointLightDisplay.m` indexing. Continuous box endpoint differences are retained. Penn visibility 0 is treated as unavailable and masked, because many such coordinates are placeholders near the image corner; these are not valid occluded-joint targets. Original JPEG bytes are copied without recompression. Generated receipts record skipped annotations, split counts, and whether both train and validation are nonempty.
+
+A local exploratory pilot was checked using 14 original sequences: 8 train, 2 validation, and 4 native test. Sampling every fifth frame produced 148/41/100 images. Ultralytics accepted all 289 labels without corrupt-label reports, and representative source/annotation overlays were inspected. Sequence 1865 has 73 coordinate rows but 72 boxes and is excluded rather than padded. This establishes converter operation, not model accuracy or training improvement. Identities and source overlap remain to be audited; some footage includes unannotated background people. Raw data, split manifests, model weights, environments and generated images are excluded from Git.
+
+For fine-tuning, supply a reviewed explicit sequence manifest and require nonempty training and validation. Tiny parser fixtures may have empty validation; their receipt marks `trainable_split: false`. Default Ultralytics training masks unavailable coordinate targets but still trains their keypoint confidence toward zero, including the five unavailable facial points. Body-joint-only results are not the standard full COCO pose benchmark.
+
+
 ## Output artifacts
 
 The pipeline produces four artifacts in `--output-dir`:
@@ -114,6 +144,7 @@ The pipeline produces four artifacts in `--output-dir`:
 
 - Ultralytics YOLO Pose: `https://github.com/ultralytics/ultralytics` (AGPL-3.0). Informed model loading, COCO keypoint conventions, and tracker integration.
 - Shalbulov exercise_counter: `https://github.com/Shalbulov/exercise_counter` (MIT intent). Informed confidence gating, independent leg evaluation, and return-to-extension counter trigger logic.
+- Penn Action Dataset: Weiyu Zhang, Menglong Zhu, and Konstantinos Derpanis, "From Actemes to Action: A Strongly-supervised Representation for Detailed Action Understanding", IEEE International Conference on Computer Vision (ICCV), 2013. URL: `https://www.cis.upenn.edu/~kostas/Penn_Action.tar.gz`, project page: `http://dreamdragon.github.io/PennAction/`. Informs keypoint coordinate parsing, official 13-joint order, and sequence-level train/test splits for YOLO pose converter.
 
 ## Known limitations and remaining manual checks
 
