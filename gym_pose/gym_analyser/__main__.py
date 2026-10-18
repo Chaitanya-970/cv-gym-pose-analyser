@@ -61,6 +61,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=3,
         help="Consecutive frames required for stage transitions (default: 3).",
     )
+    parser.add_argument("--departure-frames",type=int,default=2,help="Valid consecutive departure frames needed to observe an attempt (default:2)")
     parser.add_argument(
         "--max-gap",
         type=float,
@@ -87,6 +88,8 @@ def main() -> None:
     args = parser.parse_args()
 
     try:
+        if args.departure_frames < 1:
+            raise ValueError("departure-frames must be positive")
         config = CounterConfig(
             down_angle=args.down_angle,
             up_angle=args.up_angle,
@@ -110,6 +113,7 @@ def main() -> None:
             device=args.device,
             tracker=args.tracker,
             overwrite=args.overwrite,
+            departure_frames=args.departure_frames,
         )
         if summary.get("status") != "completed":
             sys.stderr.write(f"Processing ended with non-completed status '{summary.get('status')}': {summary.get('read_status_note', '')}\n")
@@ -118,6 +122,7 @@ def main() -> None:
         print("Processing completed successfully.")
         print(f"Processed frames: {summary['processed_frames']}")
         print(f"Completed repetitions: {summary['completed_reps']}")
+        print(f"Uncounted observed attempts: {summary.get('attempt_observations',{}).get('uncounted_attempts',0)}")
         print(f"Outputs written to: {args.output_dir}")
     except Exception as e:
         sys.stderr.write(f"Execution error: {e}\n")

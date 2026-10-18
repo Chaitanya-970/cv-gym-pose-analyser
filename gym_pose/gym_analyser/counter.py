@@ -68,6 +68,8 @@ class FrameResult:
     hip_angle_deg: Optional[float] = None
     torso_reason: str = "not_evaluated"
     hip_reason: str = "not_evaluated"
+    attempt_id: Optional[int] = None
+    last_attempt_reason: str = ""
 
 
 class SquatCounter:

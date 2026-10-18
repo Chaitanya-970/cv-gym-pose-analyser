@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from .counter import CounterConfig, FrameResult, SquatCounter
+from .attempts import AttemptTracker
 from .geometry import COCO_PAIRS
 from .posture import evaluate_posture, evaluate_posture_auto_side
 
@@ -28,6 +29,7 @@ def export_csv(results: List[FrameResult], csv_path: Path) -> None:
         "stage",
         "completed_reps",
         "posture_side", "torso_inclination_deg", "hip_angle_deg", "torso_reason", "hip_reason",
+        "attempt_id", "last_attempt_reason",
     ]
     with open(csv_path, mode="w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
@@ -58,6 +60,8 @@ def export_csv(results: List[FrameResult], csv_path: Path) -> None:
                     "hip_angle_deg": "" if r.hip_angle_deg is None else f"{r.hip_angle_deg:.2f}",
                     "torso_reason": r.torso_reason,
                     "hip_reason": r.hip_reason,
+                    "attempt_id": r.attempt_id if r.attempt_id is not None else "",
+                    "last_attempt_reason": r.last_attempt_reason,
                 }
             )
 
@@ -207,7 +211,7 @@ def draw_hud(
     h, w = frame.shape[:2]
     # Draw top semi-transparent banner
     overlay = frame.copy()
-    cv2.rectangle(overlay, (0, 0), (w, 88), (20, 20, 20), -1)
+    cv2.rectangle(overlay, (0, 0), (w, 110), (20, 20, 20), -1)
     cv2.addWeighted(overlay, 0.75, frame, 0.25, 0, frame)
 
     angle_str = (
@@ -238,6 +242,10 @@ def draw_hud(
     cv2.putText(frame, f"TORSO FROM VERTICAL: {torso} | HIP: {hip}",
                 (15,77),cv2.FONT_HERSHEY_SIMPLEX,0.48,(220,220,220),1,cv2.LINE_AA)
 
+    if result.last_attempt_reason:
+        cv2.putText(frame,"LAST ATTEMPT: "+result.last_attempt_reason.replace("_"," "),
+                    (15,99),cv2.FONT_HERSHEY_SIMPLEX,0.45,(220,220,220),1,cv2.LINE_AA)
+
 
 def attach_posture(result: FrameResult, detections: List[Dict[str, Any]], config: CounterConfig) -> FrameResult:
     """Measure only an unambiguous compatible subject; knee and torso availability are independent."""
@@ -260,6 +268,7 @@ def run_pipeline(
     device: str = "cpu",
     tracker: str = "bytetrack.yaml",
     overwrite: bool = False,
+    departure_frames: int = 2,
 ) -> Dict[str, Any]:
     """Execute complete video analysis pipeline with explicit lifecycle and error reporting."""
     # 1. Input and output path validation
@@ -286,10 +295,11 @@ def run_pipeline(
     out_csv_path = output_dir / "angles.csv"
     out_summary_path = output_dir / "summary.json"
     out_plot_path = output_dir / "angle_plot.png"
+    out_attempts_path = output_dir / "attempts.json"
 
     # Purge stale files from earlier runs when overwrite is permitted
     if overwrite:
-        for stale_path in (out_video_path, out_csv_path, out_summary_path, out_plot_path):
+        for stale_path in (out_video_path, out_csv_path, out_summary_path, out_plot_path, out_attempts_path):
             if stale_path.exists():
                 try:
                     stale_path.unlink()
@@ -303,6 +313,7 @@ def run_pipeline(
     frame_idx = 0
     valid_count = 0
     counter = SquatCounter(config)
+    attempts = AttemptTracker(config, departure_frames)
 
     fps = 0.0
     width = 0
@@ -413,6 +424,11 @@ def run_pipeline(
                 video_time_s=video_time_s,
                 detections=detections,
             )
+            attempts.observe(result,counter.armed_side)
+            latest=attempts.events[-1] if attempts.events else None
+            event_id=attempts.active_id
+            if latest and latest['end_frame']==result.frame_index:event_id=latest['attempt_id']
+            result=replace(result,attempt_id=event_id,last_attempt_reason=latest['reason'] if latest else '')
             result = attach_posture(result, detections, config)
             results.append(result)
             if result.valid:
@@ -468,6 +484,8 @@ def run_pipeline(
                 )
             )
 
+        attempt_report=attempts.finish('decode_incomplete' if is_incomplete else 'video_ended')
+        export_summary(attempt_report,out_attempts_path)
         # Export CSV and Plot
         export_csv(results, out_csv_path)
         export_angle_plot(results, config, out_plot_path)
@@ -506,6 +524,13 @@ def run_pipeline(
             "valid_observations": valid_count,
             "valid_observation_fraction": round(valid_fraction, 4),
             "completed_reps": counter.completed_reps,
+            "attempt_observations": {
+                "counted_attempts": attempt_report['counted_attempts'],
+                "uncounted_attempts": attempt_report['uncounted_attempts'],
+                "pre_arming": attempt_report['pre_arming'],
+                "departure_frames": departure_frames,
+                "interpretation": "Software-defined observed attempts, not posture judgements",
+            },
             "posture_observations": {
                 "torso_valid_frames": sum(r.torso_inclination_deg is not None for r in results),
                 "hip_valid_frames": sum(r.hip_angle_deg is not None for r in results),
@@ -517,6 +542,7 @@ def run_pipeline(
                 "angles_csv": str(out_csv_path),
                 "summary_json": str(out_summary_path),
                 "angle_plot": str(out_plot_path),
+                "attempts_json": str(out_attempts_path),
             },
             "limitations": [
                 "Projected 2D joint angles, not calibrated 3D anatomical angles.",
@@ -534,6 +560,10 @@ def run_pipeline(
         return summary
 
     except Exception as exc:
+        try:
+            export_summary(attempts.finish('processing_failed'),out_attempts_path)
+        except Exception:
+            pass
         # Preserve partial CSV if any frames were processed
         if results:
             try:
@@ -562,6 +592,7 @@ def run_pipeline(
                     "angles_csv": str(out_csv_path) if out_csv_path.exists() else None,
                     "summary_json": str(out_summary_path),
                     "angle_plot": str(out_plot_path) if out_plot_path.exists() else None,
+                    "attempts_json": str(out_attempts_path) if out_attempts_path.exists() else None,
                 },
                 "limitations": [
                     "Projected 2D joint angles, not calibrated 3D anatomical angles.",
