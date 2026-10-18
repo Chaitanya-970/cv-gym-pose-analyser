@@ -63,6 +63,11 @@ class FrameResult:
     reason: str
     stage: str
     completed_reps: int
+    posture_side: Optional[str] = None
+    torso_inclination_deg: Optional[float] = None
+    hip_angle_deg: Optional[float] = None
+    torso_reason: str = "not_evaluated"
+    hip_reason: str = "not_evaluated"
 
 
 class SquatCounter:

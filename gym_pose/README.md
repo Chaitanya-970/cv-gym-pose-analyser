@@ -135,7 +135,7 @@ The pipeline produces four artifacts in `--output-dir`:
 
 1. `annotated.mp4`: Source video retaining original dimensions and framerate, overlaid with COCO skeleton lines, highlighted active limb segments, knee joint vertex circle, joint angle arc drawn via OpenCV ellipse, and the repetition counter HUD banner.
 2. `angles.csv`: Per-frame tabular data with columns:
-   `frame_index, video_time_s, track_id, selected_side, knee_angle_deg, confidence, valid, reason, stage, completed_reps`.
+   `frame_index, video_time_s, track_id, selected_side, knee_angle_deg, confidence, valid, reason, stage, completed_reps, posture_side, torso_inclination_deg, hip_angle_deg, torso_reason, hip_reason`.
    Missing numeric values are blank strings, never zeros. Valid frames report the actual observed side even during arming.
 3. `summary.json`: Run metadata including Python and package versions, configuration parameters, source declared frame count and duration, processed frame count and duration, valid observation count and fraction, completed repetition count, read status note, and explicit limitations.
 4. `angle_plot.png`: Matplotlib time series plot of knee angles over video time. Missing and invalid frames appear as gaps in the curve rather than connected lines.
@@ -169,3 +169,19 @@ Example baseline validation (Windows, separate CUDA environment):
 ```
 
 A local pretrained baseline and bounded one-epoch training smoke tests have run. The smoke tests establish that training/checkpoint saving work; they do not establish an improved exercise model. The validation set is only two correlated videos containing unlabelled spotters, so its scores have substantial limitations. The original inference checkpoint stays in use; experimental weights and all run artifacts remain ignored. The held-out test split has not been scored. Missing faces are masked in OKS and do not automatically reduce its denominator; reported pose results concern the annotated visible body-joint subset rather than full COCO equivalence.
+
+## Posture observations and count evaluation
+
+The video pipeline now exports projected torso inclination and hip angle, their measurement side and availability reasons. Torso inclination is unsigned relative to upward image vertical (upright 0 degrees), so it cannot distinguish forward/backward lean without orientation information and is affected by camera roll. Hip angle uses shoulder-hip-knee. Confidence/geometry failures stay blank rather than zero; a genuinely measured zero-degree torso remains valid. Visible torso measurements may remain available when the knee is hidden. Ambiguous subjects and identity mismatch suppress observations. The video HUD shows both angles, and `summary.json` includes torso/hip valid-frame counts. These are descriptive measurements, not validated posture grades or safety advice. Attempt explanations are still a design milestone.
+
+Two previously human-reviewed clips were rerun after integration: counts remained 2 and 6, with 213 and 1524 decoded frames respectively. The latter retains its pre-existing container metadata discrepancy (1526 declared versus 1524 decoded); a correct count does not erase that warning. These two examples do not establish general counting or posture accuracy.
+
+Evaluate saved counts without loading a model:
+
+```powershell
+.\.venv\Scripts\python.exe -m gym_analyser.evaluation `
+  --predictions-dir output/real_squats `
+  --ground-truth output/real_squats/reviewed_counts.json
+```
+
+Only explicit human-reviewed counts enter MAE/exact-match denominators. Unknown counts remain excluded, including explicit `human_count: null` even if an alias field exists. Duplicate JSON keys and failed-processing summaries are rejected. Optional `--output-json` must use a new path and cannot overwrite human labels or existing receipts. Count comparison does not verify processing completeness or temporal event boundaries; inspect each run's status as well. Native data/label/source identities still require independent review. The Task11 expanded-data scene descriptions have not been approved for training after discrepancies were found in visual review.

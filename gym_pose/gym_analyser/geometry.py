@@ -52,10 +52,12 @@ def calculate_angle(
     len1 = math.hypot(v1x, v1y)
     len2 = math.hypot(v2x, v2y)
 
-    if len1 < 1e-6 or len2 < 1e-6:
+    if not all(math.isfinite(v) for v in (v1x,v1y,v2x,v2y,len1,len2)) or len1 < 1e-6 or len2 < 1e-6:
         return None
 
     cos_val = (v1x * v2x + v1y * v2y) / (len1 * len2)
+    if not math.isfinite(cos_val):
+        return None
     cos_clamped = max(-1.0, min(1.0, cos_val))
     return math.degrees(math.acos(cos_clamped))
 

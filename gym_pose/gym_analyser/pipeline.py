@@ -5,11 +5,13 @@ import json
 import math
 import os
 import sys
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from .counter import CounterConfig, FrameResult, SquatCounter
 from .geometry import COCO_PAIRS
+from .posture import evaluate_posture, evaluate_posture_auto_side
 
 
 def export_csv(results: List[FrameResult], csv_path: Path) -> None:
@@ -25,6 +27,7 @@ def export_csv(results: List[FrameResult], csv_path: Path) -> None:
         "reason",
         "stage",
         "completed_reps",
+        "posture_side", "torso_inclination_deg", "hip_angle_deg", "torso_reason", "hip_reason",
     ]
     with open(csv_path, mode="w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
@@ -50,6 +53,11 @@ def export_csv(results: List[FrameResult], csv_path: Path) -> None:
                     "reason": r.reason,
                     "stage": r.stage,
                     "completed_reps": r.completed_reps,
+                    "posture_side": r.posture_side or "",
+                    "torso_inclination_deg": "" if r.torso_inclination_deg is None else f"{r.torso_inclination_deg:.2f}",
+                    "hip_angle_deg": "" if r.hip_angle_deg is None else f"{r.hip_angle_deg:.2f}",
+                    "torso_reason": r.torso_reason,
+                    "hip_reason": r.hip_reason,
                 }
             )
 
@@ -199,7 +207,7 @@ def draw_hud(
     h, w = frame.shape[:2]
     # Draw top semi-transparent banner
     overlay = frame.copy()
-    cv2.rectangle(overlay, (0, 0), (w, 65), (20, 20, 20), -1)
+    cv2.rectangle(overlay, (0, 0), (w, 88), (20, 20, 20), -1)
     cv2.addWeighted(overlay, 0.75, frame, 0.25, 0, frame)
 
     angle_str = (
@@ -224,6 +232,24 @@ def draw_hud(
     cv2.putText(
         frame, col3, (w - 180, 45), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (50, 230, 50), 2, cv2.LINE_AA
     )
+
+    torso = "N/A" if result.torso_inclination_deg is None else f"{result.torso_inclination_deg:.1f}"
+    hip = "N/A" if result.hip_angle_deg is None else f"{result.hip_angle_deg:.1f}"
+    cv2.putText(frame, f"TORSO FROM VERTICAL: {torso} | HIP: {hip}",
+                (15,77),cv2.FONT_HERSHEY_SIMPLEX,0.48,(220,220,220),1,cv2.LINE_AA)
+
+
+def attach_posture(result: FrameResult, detections: List[Dict[str, Any]], config: CounterConfig) -> FrameResult:
+    """Measure only an unambiguous compatible subject; knee and torso availability are independent."""
+    if len(detections) != 1 or result.reason.startswith(("track_id_mismatch", "missing_track_id")):
+        return replace(result,torso_reason=result.reason,hip_reason=result.reason)
+    points = detections[0].get("keypoints")
+    measurement = (evaluate_posture(points,result.selected_side,config.min_joint_confidence)
+                   if result.selected_side else evaluate_posture_auto_side(points,config.min_joint_confidence))
+    return replace(result,posture_side=measurement.side if measurement.side in {"left","right"} else None,
+                   torso_inclination_deg=measurement.torso_inclination_deg,
+                   hip_angle_deg=measurement.hip_angle_deg,
+                   torso_reason=measurement.torso_reason,hip_reason=measurement.hip_reason)
 
 
 def run_pipeline(
@@ -387,6 +413,7 @@ def run_pipeline(
                 video_time_s=video_time_s,
                 detections=detections,
             )
+            result = attach_posture(result, detections, config)
             results.append(result)
             if result.valid:
                 valid_count += 1
@@ -479,6 +506,12 @@ def run_pipeline(
             "valid_observations": valid_count,
             "valid_observation_fraction": round(valid_fraction, 4),
             "completed_reps": counter.completed_reps,
+            "posture_observations": {
+                "torso_valid_frames": sum(r.torso_inclination_deg is not None for r in results),
+                "hip_valid_frames": sum(r.hip_angle_deg is not None for r in results),
+                "processed_frames": frame_idx,
+                "interpretation": "Projected 2D measurements; unsigned torso angle from upward image vertical, not a form grade",
+            },
             "output_paths": {
                 "annotated_video": str(out_video_path),
                 "angles_csv": str(out_csv_path),
@@ -489,6 +522,7 @@ def run_pipeline(
                 "Projected 2D joint angles, not calibrated 3D anatomical angles.",
                 "Repetition counts reflect threshold transitions, not validated clinical accuracy.",
                 "Assumes a stationary camera with a clear side profile of a single person.",
+                "Torso inclination is unsigned and depends on camera roll; posture observations do not establish safe or correct form.",
             ],
         }
 
@@ -533,6 +567,7 @@ def run_pipeline(
                     "Projected 2D joint angles, not calibrated 3D anatomical angles.",
                     "Repetition counts reflect threshold transitions, not validated clinical accuracy.",
                     "Assumes a stationary camera with a clear side profile of a single person.",
+                "Torso inclination is unsigned and depends on camera roll; posture observations do not establish safe or correct form.",
                 ],
             }
             try:
