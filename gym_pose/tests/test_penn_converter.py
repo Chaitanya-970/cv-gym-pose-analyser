@@ -573,6 +573,8 @@ class TestPennConverter(unittest.TestCase):
             self.assertEqual(frame.read_bytes(), exported.read_bytes())
             self.assertFalse(stats["trainable_split"])
             self.assertTrue((output / "conversion_receipt.json").exists())
+            evidence = json.loads((output / "source_inventory.json").read_text())
+            self.assertEqual([(r["seq"], r["train"]) for r in evidence], [("0001", 1)])
 
     def test_output_link_rejected_before_resolution(self):
         with tempfile.TemporaryDirectory() as tmp:

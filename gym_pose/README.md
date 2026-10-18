@@ -152,3 +152,20 @@ The pipeline produces four artifacts in `--output-dir`:
 2. Subject orientation: Designed for side-view single-person recordings. Oblique or frontal angles foreshorten limb segments and distort angle measurements.
 3. No automatic form correction: The system detects threshold crossings. It does not validate squat depth safety, back alignment, or medical correctness.
 4. Manual validation requirement: Synthetic test videos verify output mechanics and file generation, not human pose squat counting accuracy. Verification against human-reviewed ground truth remains pending for untested clips.
+
+## Training and validation runner
+
+Use `python -m gym_analyser.train_cli --help` from `gym_pose/`. Real runs require a local pose checkpoint (default searches `models/`), a COCO-17 person data YAML, nonempty train/validation, an exact sequence split manifest, original `source_inventory.json` metadata, and matching pose labels. The converter now emits both split and source metadata. Split membership and original native flags are checked independently; exact duplicate image content across splits is rejected. Near-duplicates and shared identities still require a separate audit.
+
+For configuration validation only, add `--dry-run`. Run outputs must use a fresh directory outside the dataset; `--overwrite` does not bypass this. Receipts include original/frozen YAML hashes, image/label content fingerprints, source/split hashes, model hash, numeric metrics, runtime and PyTorch GPU memory when executed. Training accepts `--optimizer`, `--lr0`, `--freeze`, `--batch`, `--imgsz`, `--epochs` and `--no-amp`; automatic optimizer selection can override its requested learning rate. Current explicit defaults are AdamW and learning rate 0.0001, pending experiment validation. GPU memory figures exclude other apps and driver allocations.
+
+Example baseline validation (Windows, separate CUDA environment):
+
+```powershell
+.\.venv_cuda\Scripts\python.exe -m gym_analyser.train_cli `
+  --mode val --data test_data/training_audit/penn_pilot_yolo_09/data.yaml `
+  --model models/yolo11n-pose.pt --device 0 --imgsz 320 --batch 4 `
+  --output-dir output/experiments/my_baseline
+```
+
+A local pretrained baseline and bounded one-epoch training smoke tests have run. The smoke tests establish that training/checkpoint saving work; they do not establish an improved exercise model. The validation set is only two correlated videos containing unlabelled spotters, so its scores have substantial limitations. The original inference checkpoint stays in use; experimental weights and all run artifacts remain ignored. The held-out test split has not been scored. Missing faces are masked in OKS and do not automatically reduce its denominator; reported pose results concern the annotated visible body-joint subset rather than full COCO equivalence.

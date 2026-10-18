@@ -7,6 +7,7 @@ mapping the 12 corresponding body joints and setting facial landmarks as unannot
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import os
@@ -756,6 +757,19 @@ def run_conversion(
             lf.write(yolo_line + "\n")
 
         stats["converted_frames"][split_name] += 1
+
+    # Native split evidence travels with the export for independent runner checks.
+    source_inventory = []
+    for seq_id in sorted(split_lookup):
+        annotation = annot_by_seq[seq_id]
+        original_file = labels_dir / (seq_id + ".mat")
+        source_inventory.append({
+            "seq": seq_id, "train": annotation.is_train, "action": annotation.action,
+            "nframes": annotation.nframes,
+            "sha256": hashlib.sha256(original_file.read_bytes()).hexdigest(),
+        })
+    with (out_path / "source_inventory.json").open("w", encoding="utf-8") as inventory_file:
+        json.dump(source_inventory, inventory_file, indent=2)
 
     # Write data.yaml
     yaml_path = write_yolo_data_yaml(str(out_path), dataset_name=f"penn_{action_filter}")
