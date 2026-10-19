@@ -11,6 +11,7 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from .counter import CounterConfig, FrameResult, SquatCounter
 from .attempts import AttemptTracker
+from .feedback_observations import build_feedback_observations
 from .session_feedback import summarise_attempt_posture, load_csv_frame_rows
 from .geometry import COCO_PAIRS
 from .posture import evaluate_posture, evaluate_posture_auto_side
@@ -102,14 +103,14 @@ def export_angle_plot(
         color="#2ca02c",
         linestyle="--",
         linewidth=1.2,
-        label=f"Up Threshold ({config.up_angle}°)",
+        label=f"Up Threshold ({config.up_angle}Â°)",
     )
     ax.axhline(
         config.down_angle,
         color="#d62728",
         linestyle="--",
         linewidth=1.2,
-        label=f"Down Threshold ({config.down_angle}°)",
+        label=f"Down Threshold ({config.down_angle}Â°)",
     )
 
     ax.set_xlabel("Video Time (seconds)")
@@ -188,7 +189,7 @@ def draw_knee_overlay(
     )
 
     # Draw angle text label near the knee
-    label_text = f"{knee_angle_deg:.1f}°"
+    label_text = f"{knee_angle_deg:.1f}Â°"
     cv2.putText(
         frame,
         label_text,
@@ -216,7 +217,7 @@ def draw_hud(
     cv2.addWeighted(overlay, 0.75, frame, 0.25, 0, frame)
 
     angle_str = (
-        f"{result.knee_angle_deg:.1f}°"
+        f"{result.knee_angle_deg:.1f}Â°"
         if result.knee_angle_deg is not None
         else f"N/A ({result.reason})"
     )
@@ -298,10 +299,11 @@ def run_pipeline(
     out_plot_path = output_dir / "angle_plot.png"
     out_attempts_path = output_dir / "attempts.json"
     out_posture_summary_path = output_dir / "posture_summary.json"
+    out_feedback_path = output_dir / "feedback_observations.json"
 
     # Purge stale files from earlier runs when overwrite is permitted
     if overwrite:
-        for stale_path in (out_video_path, out_csv_path, out_summary_path, out_plot_path, out_attempts_path, out_posture_summary_path):
+        for stale_path in (out_video_path, out_csv_path, out_summary_path, out_plot_path, out_attempts_path, out_posture_summary_path, out_feedback_path):
             if stale_path.exists():
                 try:
                     stale_path.unlink()
@@ -492,6 +494,8 @@ def run_pipeline(
         export_csv(results, out_csv_path)
         posture_summary = summarise_attempt_posture(load_csv_frame_rows(out_csv_path), attempt_report)
         export_summary(posture_summary, out_posture_summary_path)
+        feedback = build_feedback_observations(posture_summary, attempt_report)
+        export_summary(feedback, out_feedback_path)
         export_angle_plot(results, config, out_plot_path)
 
         valid_fraction = valid_count / frame_idx if frame_idx > 0 else 0.0
@@ -529,6 +533,7 @@ def run_pipeline(
             "valid_observation_fraction": round(valid_fraction, 4),
             "completed_reps": counter.completed_reps,
             "per_attempt_posture": posture_summary["summary"],
+            "feedback_observations": feedback["summary"],
             "attempt_observations": {
                 "counted_attempts": attempt_report['counted_attempts'],
                 "uncounted_attempts": attempt_report['uncounted_attempts'],
@@ -549,6 +554,7 @@ def run_pipeline(
                 "angle_plot": str(out_plot_path),
                 "attempts_json": str(out_attempts_path),
                 "posture_summary_json": str(out_posture_summary_path),
+                "feedback_observations_json": str(out_feedback_path),
             },
             "limitations": [
                 "Projected 2D joint angles, not calibrated 3D anatomical angles.",
@@ -576,6 +582,7 @@ def run_pipeline(
                 export_csv(results, out_csv_path)
                 partial_posture = summarise_attempt_posture(load_csv_frame_rows(out_csv_path), attempts.report())
                 export_summary(partial_posture, out_posture_summary_path)
+                export_summary(build_feedback_observations(partial_posture, attempts.report()), out_feedback_path)
             except Exception:
                 pass
 
@@ -602,6 +609,7 @@ def run_pipeline(
                     "angle_plot": str(out_plot_path) if out_plot_path.exists() else None,
                     "attempts_json": str(out_attempts_path) if out_attempts_path.exists() else None,
                     "posture_summary_json": str(out_posture_summary_path) if out_posture_summary_path.exists() else None,
+                    "feedback_observations_json": str(out_feedback_path) if out_feedback_path.exists() else None,
                 },
                 "limitations": [
                     "Projected 2D joint angles, not calibrated 3D anatomical angles.",

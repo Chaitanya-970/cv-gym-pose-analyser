@@ -33,6 +33,7 @@ ALLOWED_ARTIFACTS: Dict[str, str] = {
     "summary.json": "application/json",
     "attempts.json": "application/json",
     "posture_summary.json": "application/json",
+    "feedback_observations.json": "application/json",
     "angles.csv": "text/csv; charset=utf-8",
     "angle_plot.png": "image/png",
     "annotated.mp4": "video/mp4",
@@ -492,6 +493,14 @@ class JobManager:
             except Exception:
                 pass
 
+        feedback_data = None
+        feedback_path = results_dir / "feedback_observations.json"
+        if feedback_path.is_file() and feedback_path.resolve().parent == results_dir:
+            try:
+                feedback_data = json.loads(feedback_path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                pass
+
         completed_reps = 0
         processed_frames = 0
         read_status_note = meta.get("read_status_note")
@@ -518,5 +527,6 @@ class JobManager:
             "summary": summary_data,
             "attempts": attempts_data,
             "posture_summary": posture_data,
+            "feedback_observations": feedback_data,
             "available_artifacts": available_artifacts,
         }

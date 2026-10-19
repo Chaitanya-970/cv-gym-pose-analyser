@@ -204,6 +204,8 @@ A five-epoch fine-tuning experiment on the expanded exploratory dataset improved
 
 The optional local interface uploads a video, runs the existing analyser, shows movement counts and per-event posture observations, and offers result downloads. It binds to localhost and allows one analysis at a time. These observations are projected 2D measurements; validated form grading and broader accuracy evaluation remain future work.
 
+The downloadable `feedback_observations.json` adds explanations and within-video comparisons of measured counted cycles on the same track and body side. It reports torso inclination and projected knee-angle variation, excludes uncounted setup/return movements from comparisons, and explains missing measurements. Coverage settings are operational filters, not validated technique standards. The web results show these observations alongside each movement. Older result folders without this artifact remain readable.
+
 Keep web dependencies separate from the inference environment on Windows:
 
 ```powershell

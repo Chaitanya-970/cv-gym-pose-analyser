@@ -1,7 +1,7 @@
 """FastAPI web application and local server for 2D Gym Pose Analyser.
 
 Attribution & Upstream Patterns:
-- Built with FastAPI (MIT License, Copyright (c) 2018 Sebastián Ramírez)
+- Built with FastAPI (MIT License, Copyright (c) 2018 SebastiÃ¡n RamÃ­rez)
   https://github.com/fastapi/fastapi/blob/master/LICENSE
 - Request Files & UploadFile chunked handling adapted from:
   https://fastapi.tiangolo.com/tutorial/request-files/
@@ -288,6 +288,12 @@ INDEX_HTML = """<!DOCTYPE html>
         <strong>Incomplete Processing Warning:</strong> <span id="incomplete-note-text"></span>
       </div>
 
+      <div style="margin-top: 16px;">
+        <h3>Movement observations</h3>
+        <p style="font-size: 0.82rem; color: var(--text-muted);">Comparisons describe measured counted cycles in this video. They do not grade technique or establish safety.</p>
+        <div id="session-observations"></div>
+      </div>
+
       <!-- Attempt Observations Table -->
       <div style="margin-top: 16px;">
         <h3>Observed Movement Events</h3>
@@ -509,6 +515,23 @@ INDEX_HTML = """<!DOCTYPE html>
         incompleteNoteBox.classList.add('hidden');
       }
 
+      const feedback = data.feedback_observations || {};
+      const feedbackSummary = feedback.summary || {};
+      const sessionContainer = document.getElementById('session-observations');
+      sessionContainer.textContent = '';
+      const sessionTexts = [...(feedbackSummary.session_observations || [])];
+      (feedbackSummary.comparisons || []).forEach(group => {
+        sessionTexts.push(...(group.observations || []), ...(group.limitations || []));
+      });
+      if (!sessionTexts.length) sessionTexts.push('No within-session comparison is available for this analysis.');
+      sessionTexts.forEach(text => {
+        const paragraph = document.createElement('p');
+        paragraph.textContent = text;
+        sessionContainer.appendChild(paragraph);
+      });
+      const feedbackMap = {};
+      (feedback.attempts || []).forEach(event => { feedbackMap[event.attempt_id] = event; });
+
       // Render attempts table
       attemptsTbody.textContent = '';
       if (attemptsList.length === 0) {
@@ -562,7 +585,13 @@ INDEX_HTML = """<!DOCTYPE html>
           tdExpl.appendChild(explDiv);
 
           // Add posture observations if available
-          const post = postureMap[att.attempt_id];
+          const observedFeedback = feedbackMap[att.attempt_id];
+          if (observedFeedback && observedFeedback.movement_explanation) {
+            const context = document.createElement('p');
+            context.textContent = observedFeedback.movement_explanation.context_note || '';
+            tdExpl.appendChild(context);
+          }
+          const post = observedFeedback || postureMap[att.attempt_id];
           if (post && post.observations && post.observations.length > 0) {
             const postDiv = document.createElement('div');
             postDiv.style.marginTop = '4px';

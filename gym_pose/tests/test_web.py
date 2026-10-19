@@ -623,3 +623,22 @@ class MetadataRetryTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipUnless(HAS_WEB_DEPS, "Web dependencies not installed")
+class TestFeedbackAPI(unittest.TestCase):
+    def test_feedback_results_and_download_preserve_evidence(self):
+        with tempfile.TemporaryDirectory() as folder:
+            manager = JobManager(storage_dir=Path(folder)/"jobs")
+            job_id, _, _ = manager.save_upload_file(io.BytesIO(b"video"), "clip.mp4")
+            results_dir = Path(folder)/"jobs"/job_id/"results"
+            feedback = {"summary": {"counted_events": 2, "comparisons": []},
+                        "attempts": [{"attempt_id": 1, "observations": ["No reliable comparison available."]}]}
+            (results_dir/"feedback_observations.json").write_text(json.dumps(feedback))
+            client = TestClient(create_app(manager))
+            result = client.get(f"/api/jobs/{job_id}/results")
+            self.assertEqual(result.status_code, 200)
+            self.assertEqual(result.json()["feedback_observations"], feedback)
+            download = client.get(f"/api/jobs/{job_id}/download/feedback_observations.json")
+            self.assertEqual(download.status_code, 200)
+            self.assertEqual(download.json(), feedback)
