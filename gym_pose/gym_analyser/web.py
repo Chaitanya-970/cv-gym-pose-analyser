@@ -19,7 +19,7 @@ This module provides:
 import argparse
 import sys
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Union
 
 # Deferred framework imports to permit clean module inspection
 try:
@@ -236,6 +236,7 @@ INDEX_HTML = """<!DOCTYPE html>
 </head>
 <body>
   <div class="container">
+    <nav class="review-nav" style="display: flex; justify-content: flex-end; margin-bottom: 8px;"><a href="/review/" class="review-nav-link" style="color: var(--primary); font-size: 0.9rem; text-decoration: none; border: 1px solid var(--card-border); padding: 6px 14px; border-radius: 6px; background: var(--card-bg);">&rarr; Human Review Workspace (Label raw video BEFORE viewing model output)</a></nav>
     <header>
       <h1>2D Gym Pose Analyser</h1>
       <p>Single-user local squat repetition counter and 2D kinematic feedback</p>
@@ -245,6 +246,7 @@ INDEX_HTML = """<!DOCTYPE html>
     <div class="card">
       <h2>Recording Guidance & Operational Constraints</h2>
       <div class="notice-box">
+        <div><strong>Human Review:</strong> To reduce prediction-induced bias, review and record raw video repetitions in the <a href="/review/" style="color: var(--primary); text-decoration: underline;">Human Review Workspace</a> before running automated model analysis.</div>
         <div><strong>Camera Setup:</strong> Single-person, stationary camera at waist height perpendicular to movement plane, showing full body from head to feet in side view.</div>
         <div><strong>Kinematic Feedback:</strong> Measurements represent projected 2D coordinates from this single camera view. They do not constitute clinical safety evaluations or medical form judgements.</div>
         <div><strong>Uncounted Movements:</strong> Movements not meeting threshold criteria (such as stance setup, weight pickup, or weight return) are reported as uncounted attempts. An uncounted event does not indicate bad form.</div>
@@ -858,11 +860,22 @@ INDEX_HTML = """<!DOCTYPE html>
 """
 
 
-def create_app(job_manager: Optional[JobManager] = None) -> Any:
+def create_app(
+    job_manager: Optional[JobManager] = None,
+    *,
+    enable_review: bool = True,
+    review_storage_root: Optional[Union[str, Path]] = None,
+    review_max_upload_bytes: int = DEFAULT_MAX_UPLOAD_BYTES,
+    **kwargs: Any,
+) -> Any:
     """FastAPI application factory for 2D Gym Pose Analyser.
 
-    Allows injecting a configured JobManager for isolated unit and integration testing.
+    Allows injecting a configured JobManager for isolated unit and integration testing,
+    and optionally mounts the raw human video review workspace under /review.
     """
+    if kwargs:
+        raise TypeError(f"Unexpected keyword argument: {list(kwargs.keys())[0]}")
+
     if FastAPI is None:
         raise ImportError(
             "FastAPI is not installed. Please install optional dependencies from gym_pose/requirements-web.txt."
@@ -887,10 +900,31 @@ def create_app(job_manager: Optional[JobManager] = None) -> Any:
         version="1.0.0",
     )
 
+    if not isinstance(enable_review, bool):
+        raise TypeError("enable_review must be a boolean")
+    if enable_review:
+        from .review_web import create_review_app
+        from .review_store import DEFAULT_STORAGE_ROOT
+
+        review_root_path = Path(review_storage_root if review_storage_root is not None else DEFAULT_STORAGE_ROOT)
+        review_root = review_root_path.resolve()
+        jobs_root = Path(job_manager.storage_dir).resolve()
+        if review_root == jobs_root or review_root in jobs_root.parents or jobs_root in review_root.parents:
+            raise ValueError("Human-review and analysis-job storage must be separate directories")
+        app.mount("/review", create_review_app(
+            storage_root=review_root_path,
+            max_upload_bytes=review_max_upload_bytes,
+        ))
+
     @app.get("/", response_class=HTMLResponse)
     async def index() -> HTMLResponse:
         """Serve the self-contained single-page web interface."""
-        return HTMLResponse(content=INDEX_HTML, status_code=200)
+        html = INDEX_HTML
+        if not enable_review:
+            import re
+            html = re.sub(r'<nav class="review-nav".*?</nav>', "", html, count=1, flags=re.DOTALL)
+            html = re.sub(r'<div><strong>Human Review:</strong>.*?</div>', "", html, count=1, flags=re.DOTALL)
+        return HTMLResponse(content=html, status_code=200)
 
     @app.get("/api/status")
     async def get_server_status() -> Dict[str, Any]:
@@ -1092,6 +1126,7 @@ def main() -> None:
 
     app = create_app(job_manager)
     print(f"Starting 2D Gym Pose Analyser Web UI on http://{args.host}:{args.port}")
+    print(f"Human Review Workspace available on http://{args.host}:{args.port}/review/")
     print(f"Compute device for analysis child process: {args.device}")
     uvicorn.run(app, host=args.host, port=args.port, log_level="info")
 

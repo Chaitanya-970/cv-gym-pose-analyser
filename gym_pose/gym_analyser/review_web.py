@@ -470,6 +470,7 @@ INDEX_HTML = """<!DOCTYPE html>
 </head>
 <body>
   <div class="container">
+    <a id="nav-back-analyser" href="/" class="nav-link" style="display:none; color: var(--primary); text-decoration: none; font-size: 0.9rem; margin-bottom: 8px;">&larr; Back to Pose Analyser</a>
     <header>
       <h1>Raw Squat Video Human Review Workspace</h1>
       <p>Independent ground truth annotation and review interface</p>
@@ -531,10 +532,10 @@ INDEX_HTML = """<!DOCTYPE html>
         <div class="card">
           <h2>Export Ground Truth</h2>
           <div class="export-links">
-            <a href="/api/export/counts" download="counts.json" class="btn btn-secondary btn-sm">
+            <a id="btn-export-counts" href="#" download="counts.json" class="btn btn-secondary btn-sm">
               Export Ground Truth (counts.json)
             </a>
-            <a href="/api/export/manifest" download="manifest.json" class="btn btn-secondary btn-sm">
+            <a id="btn-export-manifest" href="#" download="manifest.json" class="btn btn-secondary btn-sm">
               Export Full Manifest (manifest.json)
             </a>
           </div>
@@ -679,6 +680,14 @@ INDEX_HTML = """<!DOCTYPE html>
 
   <script>
     // Pure helper functions (exportable for testing)
+    function resolveReviewUrl(path, currentPathname) {
+      const p = currentPathname !== undefined ? currentPathname : (typeof window !== 'undefined' && window.location ? window.location.pathname : '');
+      const cleanPath = path.startsWith('/') ? path : '/' + path;
+      const isMounted = p === '/review' || p.startsWith('/review/');
+      const prefix = isMounted ? '/review' : '';
+      return prefix + cleanPath;
+    }
+
     function parseStrictCount(str) {
       if (str === null || str === undefined) {
         return null;
@@ -722,6 +731,9 @@ INDEX_HTML = """<!DOCTYPE html>
     const btnUpload = hasDoc ? document.getElementById('btn-upload') : null;
     const uploadStatus = hasDoc ? document.getElementById('upload-status') : null;
     const btnRefreshList = hasDoc ? document.getElementById('btn-refresh-list') : null;
+    const navBackAnalyser = hasDoc ? document.getElementById('nav-back-analyser') : null;
+    const btnExportCounts = hasDoc ? (document.getElementById('btn-export-counts') || document.getElementById('export-counts-link')) : null;
+    const btnExportManifest = hasDoc ? (document.getElementById('btn-export-manifest') || document.getElementById('export-manifest-link')) : null;
 
     // HUD references
     const hudCaseId = hasDoc ? document.getElementById('hud-case-id') : null;
@@ -785,10 +797,24 @@ INDEX_HTML = """<!DOCTYPE html>
       setReviewFormDisabled(true);
     }
 
+    // Optional Return Navigation when mounted under /review/
+    if (typeof window !== 'undefined' && window.location && (window.location.pathname === '/review' || window.location.pathname.startsWith('/review/'))) {
+      const backLink = document.getElementById('nav-back-analyser');
+      if (backLink) backLink.style.display = 'inline-block';
+    }
+
+    // Dynamic resolution for export links
+    if (btnExportCounts) {
+      btnExportCounts.href = resolveReviewUrl('/api/export/counts');
+    }
+    if (btnExportManifest) {
+      btnExportManifest.href = resolveReviewUrl('/api/export/manifest');
+    }
+
     // Fetch case list
     async function fetchCases() {
       try {
-        const res = await fetch('/api/cases');
+        const res = await fetch(resolveReviewUrl('/api/cases'));
         if (!res.ok) {
           throw new Error('Failed to load cases: ' + res.status);
         }
@@ -896,7 +922,7 @@ INDEX_HTML = """<!DOCTYPE html>
       clearStatus(reviewStatus);
 
       try {
-        const res = await fetch('/api/cases/' + encodeURIComponent(targetCaseId));
+        const res = await fetch(resolveReviewUrl('/api/cases/' + encodeURIComponent(targetCaseId)));
         if (gen !== activeRequestGen) return;
 
         if (!res.ok) {
@@ -939,14 +965,14 @@ INDEX_HTML = """<!DOCTYPE html>
 
       // Update Video Player
       if (player) {
-        const videoSrc = '/api/cases/' + encodeURIComponent(cid) + '/video';
+        const videoSrc = resolveReviewUrl('/api/cases/' + encodeURIComponent(cid) + '/video');
         player.src = videoSrc;
         player.load();
       }
 
       // Raw download link
       if (rawDownloadLink) {
-        rawDownloadLink.href = '/api/cases/' + encodeURIComponent(cid) + '/video?download=1';
+        rawDownloadLink.href = resolveReviewUrl('/api/cases/' + encodeURIComponent(cid) + '/video?download=1');
       }
 
       // Populate Review Form
@@ -1121,7 +1147,7 @@ INDEX_HTML = """<!DOCTYPE html>
           formData.append('file', file);
           formData.append('group', group);
 
-          const res = await fetch('/api/upload', {
+          const res = await fetch(resolveReviewUrl('/api/upload'), {
             method: 'POST',
             body: formData
           });
@@ -1247,7 +1273,7 @@ INDEX_HTML = """<!DOCTYPE html>
         clearStatus(reviewStatus);
 
         try {
-          const res = await fetch('/api/cases/' + encodeURIComponent(savingCaseId) + '/review', {
+          const res = await fetch(resolveReviewUrl('/api/cases/' + encodeURIComponent(savingCaseId) + '/review'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
@@ -1315,6 +1341,7 @@ INDEX_HTML = """<!DOCTYPE html>
       module.exports = {
         parseStrictCount,
         sanitizeErrorMessage,
+        resolveReviewUrl,
       };
     }
   </script>

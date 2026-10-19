@@ -204,6 +204,8 @@ A five-epoch fine-tuning experiment on the expanded exploratory dataset improved
 
 The optional local interface uploads a video, runs the existing analyser, shows movement counts and per-event posture observations, and offers result downloads. It binds to localhost and allows one analysis at a time. These observations are projected 2D measurements; validated form grading and broader accuracy evaluation remain future work.
 
+The web server also hosts the raw-video human review workspace directly under `/review/` on the same port, allowing you to record ground truth before running automated model analysis without running a second server process.
+
 The downloadable `feedback_observations.json` adds explanations and within-video comparisons of measured counted cycles on the same track and body side. It reports torso inclination and projected knee-angle variation, excludes uncounted setup/return movements from comparisons, and explains missing measurements. Coverage settings are operational filters, not validated technique standards. The web results show these observations alongside each movement. Older result folders without this artifact remain readable.
 
 The additional `feedback_phases.json` locates the minimum observed knee angle and return-phase measurements within counted cycles. Web results provide seek buttons for reviewing those moments. These are attention guides based on projected measurements, not validated technique grades; missing timing or measurement evidence is reported explicitly.
@@ -216,7 +218,7 @@ python -m venv .venv_web
 .\.venv_web\Scripts\python.exe -m gym_analyser.web --port 8000 --device cpu
 ```
 
-Open http://127.0.0.1:8000. With the configured CUDA environment, use `--device 0`. Analysis uses the existing `.venv_cuda` interpreter when present, otherwise `.venv`, then the current interpreter. Prepare the inference dependencies separately using the installation instructions above. The pretrained checkpoint must already exist at `models/yolo11n-pose.pt`; the web worker does not automatically download a missing model. It does not select experimental fine-tuned checkpoints automatically.
+Open http://127.0.0.1:8000 for the video analyser, or navigate to http://127.0.0.1:8000/review/ for the raw-video human review workspace. A top navigation bar links directly between the analyser and the review workspace. With the configured CUDA environment, use `--device 0`. Analysis uses the existing `.venv_cuda` interpreter when present, otherwise `.venv`, then the current interpreter. Prepare the inference dependencies separately using the installation instructions above. The pretrained checkpoint must already exist at `models/yolo11n-pose.pt`; the web worker does not automatically download a missing model. It does not select experimental fine-tuned checkpoints automatically.
 
 Uploads are limited to 200 MB and stored privately under ignored `output/web_jobs/`. Each job gets separate input/results folders. A result URL includes its job ID so reloading can restore results. Incomplete decoding is shown explicitly; counts from an incomplete run are partial observations. Uncounted events can include setup or weight-return movements and do not establish poor form.
 
@@ -225,7 +227,7 @@ If FFmpeg with the `libx264` encoder is available on PATH, a separate H.264 `pre
 Web checks (no inference or downloads):
 
 ```powershell
-.\.venv_web\Scripts\python.exe -m unittest tests.test_web tests.test_web_media
+.\.venv_web\Scripts\python.exe -m unittest tests.test_web tests.test_web_media tests.test_review_web tests.test_review_mount
 ```
 
 The server is a local development application. Do not expose it to a network or run multiple instances against the same output storage. A server restart marks unfinished metadata interrupted; it cannot guarantee recovery from a killed machine or an externally surviving analysis process. Preserve old jobs and inspect running processes before restarting interrupted work.
@@ -237,7 +239,9 @@ For loss-ablation experiments, train mode accepts optional `--kobj` (finite nonn
 
 ## Raw-video human review workspace
 
-Use this separate local tool to record human observations before inspecting model predictions:
+Record human observations before inspecting model predictions. When running the main web interface (`gym_analyser.web`), the review workspace is automatically available at http://127.0.0.1:8000/review/.
+
+Alternatively, run the dedicated standalone review server without analyser or ML routes:
 
     .\.venv_web\Scripts\python.exe -m gym_analyser.review_web --port 8001
 
