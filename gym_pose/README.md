@@ -233,3 +233,16 @@ The server is a local development application. Do not expose it to a network or 
 The training CLI also accepts `--warmup-bias-lr` in train mode for controlled experiments. Omitting it preserves the installed Ultralytics default; an explicit finite value from 0 to 1 is forwarded and recorded in the experiment receipt. Training settings are experimental and do not automatically replace the application model.
 
 For loss-ablation experiments, train mode accepts optional `--kobj` (finite nonnegative keypoint-presence loss gain). An explicit zero disables that loss term; omission preserves the installed default. Shared network updates can still change keypoint confidence. The setting and resolved training arguments are saved in receipts.
+
+
+## Raw-video human review workspace
+
+Use this separate local tool to record human observations before inspecting model predictions:
+
+    .\.venv_web\Scripts\python.exe -m gym_analyser.review_web --port 8001
+
+Run from this gym_pose directory, then open http://127.0.0.1:8001. Upload raw MP4, WebM or MOV video, watch it, enter a count (blank means unreviewed, zero means no repetitions), and save. A count requires a reviewer identifier, raw-video acknowledgment and an explicit answer about prior exposure to predictions. Optional movement events record human intent and uncertainty. The page does not run inference or infer technique quality.
+
+Downloads include evaluator-compatible counts and a full review manifest with source hashes and edit history. Development cases and out-of-scope clips are excluded from count scoring. Candidate status alone does not establish independent final-test eligibility. Prepare any final evaluation protocol separately.
+
+Files stay in ignored output/human_reviews/ regardless of the launch directory. Modified raw files or corrupted metadata block serving/saving/export rather than silently changing labels. Keep original recordings and use one server process. Unsupported browser codecs require an external player through the raw download; this tool does not transcode videos.
