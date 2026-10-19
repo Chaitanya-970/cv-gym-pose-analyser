@@ -12,6 +12,7 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 from .counter import CounterConfig, FrameResult, SquatCounter
 from .attempts import AttemptTracker
 from .feedback_observations import build_feedback_observations
+from .phase_feedback import build_phase_feedback
 from .session_feedback import summarise_attempt_posture, load_csv_frame_rows
 from .geometry import COCO_PAIRS
 from .posture import evaluate_posture, evaluate_posture_auto_side
@@ -300,10 +301,11 @@ def run_pipeline(
     out_attempts_path = output_dir / "attempts.json"
     out_posture_summary_path = output_dir / "posture_summary.json"
     out_feedback_path = output_dir / "feedback_observations.json"
+    out_feedback_phases_path = output_dir / "feedback_phases.json"
 
     # Purge stale files from earlier runs when overwrite is permitted
     if overwrite:
-        for stale_path in (out_video_path, out_csv_path, out_summary_path, out_plot_path, out_attempts_path, out_posture_summary_path, out_feedback_path):
+        for stale_path in (out_video_path, out_csv_path, out_summary_path, out_plot_path, out_attempts_path, out_posture_summary_path, out_feedback_path, out_feedback_phases_path):
             if stale_path.exists():
                 try:
                     stale_path.unlink()
@@ -496,6 +498,8 @@ def run_pipeline(
         export_summary(posture_summary, out_posture_summary_path)
         feedback = build_feedback_observations(posture_summary, attempt_report)
         export_summary(feedback, out_feedback_path)
+        phase_feedback = build_phase_feedback(load_csv_frame_rows(out_csv_path), attempt_report)
+        export_summary(phase_feedback, out_feedback_phases_path)
         export_angle_plot(results, config, out_plot_path)
 
         valid_fraction = valid_count / frame_idx if frame_idx > 0 else 0.0
@@ -534,6 +538,7 @@ def run_pipeline(
             "completed_reps": counter.completed_reps,
             "per_attempt_posture": posture_summary["summary"],
             "feedback_observations": feedback["summary"],
+            "phase_feedback": phase_feedback["summary"],
             "attempt_observations": {
                 "counted_attempts": attempt_report['counted_attempts'],
                 "uncounted_attempts": attempt_report['uncounted_attempts'],
@@ -555,6 +560,7 @@ def run_pipeline(
                 "attempts_json": str(out_attempts_path),
                 "posture_summary_json": str(out_posture_summary_path),
                 "feedback_observations_json": str(out_feedback_path),
+                "phase_feedback_json": str(out_feedback_phases_path),
             },
             "limitations": [
                 "Projected 2D joint angles, not calibrated 3D anatomical angles.",
@@ -585,6 +591,10 @@ def run_pipeline(
                 export_summary(build_feedback_observations(partial_posture, attempts.report()), out_feedback_path)
             except Exception:
                 pass
+            try:
+                export_summary(build_phase_feedback(load_csv_frame_rows(out_csv_path), attempts.report()), out_feedback_phases_path)
+            except Exception:
+                pass
 
         # Write failed summary if not already written as incomplete
         if not is_incomplete or not out_summary_path.exists():
@@ -610,6 +620,7 @@ def run_pipeline(
                     "attempts_json": str(out_attempts_path) if out_attempts_path.exists() else None,
                     "posture_summary_json": str(out_posture_summary_path) if out_posture_summary_path.exists() else None,
                     "feedback_observations_json": str(out_feedback_path) if out_feedback_path.exists() else None,
+                    "phase_feedback_json": str(out_feedback_phases_path) if out_feedback_phases_path.exists() else None,
                 },
                 "limitations": [
                     "Projected 2D joint angles, not calibrated 3D anatomical angles.",

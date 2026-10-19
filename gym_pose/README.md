@@ -206,6 +206,8 @@ The optional local interface uploads a video, runs the existing analyser, shows 
 
 The downloadable `feedback_observations.json` adds explanations and within-video comparisons of measured counted cycles on the same track and body side. It reports torso inclination and projected knee-angle variation, excludes uncounted setup/return movements from comparisons, and explains missing measurements. Coverage settings are operational filters, not validated technique standards. The web results show these observations alongside each movement. Older result folders without this artifact remain readable.
 
+The additional `feedback_phases.json` locates the minimum observed knee angle and return-phase measurements within counted cycles. Web results provide seek buttons for reviewing those moments. These are attention guides based on projected measurements, not validated technique grades; missing timing or measurement evidence is reported explicitly.
+
 Keep web dependencies separate from the inference environment on Windows:
 
 ```powershell

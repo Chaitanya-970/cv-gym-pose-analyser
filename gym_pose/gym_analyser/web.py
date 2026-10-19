@@ -215,6 +215,23 @@ INDEX_HTML = """<!DOCTYPE html>
     }
     .alert-danger { background: #450a0a; border: 1px solid #7f1d1d; color: #fca5a5; }
     .alert-warning { background: #451a03; border: 1px solid #78350f; color: #fde68a; }
+    .btn-seek {
+      background: #1e293b;
+      border: 1px solid var(--primary);
+      color: var(--primary);
+      padding: 3px 8px;
+      border-radius: 4px;
+      font-size: 0.78rem;
+      cursor: pointer;
+      transition: background 0.2s, color 0.2s;
+      display: inline-flex;
+      align-items: center;
+      line-height: 1.2;
+    }
+    .btn-seek:hover {
+      background: var(--primary);
+      color: #0f172a;
+    }
   </style>
 </head>
 <body>
@@ -373,6 +390,68 @@ INDEX_HTML = """<!DOCTYPE html>
 
     let currentJobId = null;
     let pollInterval = null;
+    let pendingSeekCleanup = null;
+
+    function clearPendingSeek() {
+      if (pendingSeekCleanup) {
+        try {
+          pendingSeekCleanup();
+        } catch (err) {}
+        pendingSeekCleanup = null;
+      }
+    }
+
+    function isValidTimestamp(val) {
+      return typeof val === 'number' && Number.isFinite(val) && val >= 0;
+    }
+
+    function seekVideoToTime(targetTime) {
+      if (!isValidTimestamp(targetTime)) return;
+      const t = Number(targetTime);
+      clearPendingSeek();
+
+      if (!annotatedVideo) return;
+
+      const applySeek = () => {
+        let seekTo = t;
+        if (typeof annotatedVideo.duration === 'number' && Number.isFinite(annotatedVideo.duration) && annotatedVideo.duration > 0) {
+          seekTo = Math.max(0, Math.min(t, annotatedVideo.duration));
+        } else {
+          seekTo = Math.max(0, t);
+        }
+        try {
+          annotatedVideo.currentTime = seekTo;
+        } catch (e) {}
+      };
+
+      if (annotatedVideo.readyState >= 1 && typeof annotatedVideo.duration === 'number' && Number.isFinite(annotatedVideo.duration)) {
+        applySeek();
+      } else {
+        let timerId = null;
+        const onLoaded = () => {
+          cleanup();
+          applySeek();
+        };
+        const cleanup = () => {
+          annotatedVideo.removeEventListener('loadedmetadata', onLoaded);
+          if (timerId !== null) {
+            clearTimeout(timerId);
+            timerId = null;
+          }
+          if (pendingSeekCleanup === cleanup) {
+            pendingSeekCleanup = null;
+          }
+        };
+
+        annotatedVideo.addEventListener('loadedmetadata', onLoaded);
+        timerId = setTimeout(() => {
+          cleanup();
+        }, 5000);
+        pendingSeekCleanup = cleanup;
+      }
+    }
+
+    window.addEventListener('beforeunload', clearPendingSeek);
 
     fileInput.addEventListener('change', () => {
       if (fileInput.files && fileInput.files.length > 0) {
@@ -426,6 +505,7 @@ INDEX_HTML = """<!DOCTYPE html>
     });
 
     function startJobTracking(jobId, filename) {
+      clearPendingSeek();
       statusCard.classList.remove('hidden');
       resultsCard.classList.add('hidden');
       jobIdDisplay.textContent = jobId;
@@ -499,6 +579,7 @@ INDEX_HTML = """<!DOCTYPE html>
     }
 
     function renderResults(data) {
+      clearPendingSeek();
       metricReps.textContent = data.completed_reps != null ? String(data.completed_reps) : '0';
       metricFrames.textContent = data.processed_frames != null ? String(data.processed_frames) : '0';
 
@@ -515,6 +596,16 @@ INDEX_HTML = """<!DOCTYPE html>
         incompleteNoteBox.classList.add('hidden');
       }
 
+      const phaseFeedback = data.phase_feedback || (data.summary && data.summary.phase_feedback) || null;
+      const phaseFeedbackMap = {};
+      if (phaseFeedback && Array.isArray(phaseFeedback.attempts)) {
+        phaseFeedback.attempts.forEach(pa => {
+          if (pa && pa.attempt_id != null) {
+            phaseFeedbackMap[pa.attempt_id] = pa;
+          }
+        });
+      }
+
       const feedback = data.feedback_observations || {};
       const feedbackSummary = feedback.summary || {};
       const sessionContainer = document.getElementById('session-observations');
@@ -523,12 +614,35 @@ INDEX_HTML = """<!DOCTYPE html>
       (feedbackSummary.comparisons || []).forEach(group => {
         sessionTexts.push(...(group.observations || []), ...(group.limitations || []));
       });
+      if (phaseFeedback && phaseFeedback.summary && Array.isArray(phaseFeedback.summary.comparisons)) {
+        phaseFeedback.summary.comparisons.forEach(comp => {
+          if (comp && comp.observation && !sessionTexts.includes(comp.observation)) {
+            sessionTexts.push(comp.observation);
+          }
+        });
+      }
       if (!sessionTexts.length) sessionTexts.push('No within-session comparison is available for this analysis.');
       sessionTexts.forEach(text => {
         const paragraph = document.createElement('p');
         paragraph.textContent = text;
         sessionContainer.appendChild(paragraph);
       });
+      if (phaseFeedback && Array.isArray(phaseFeedback.biomechanical_limitations) && phaseFeedback.biomechanical_limitations.length > 0) {
+        const limBox = document.createElement('div');
+        limBox.style.marginTop = '8px';
+        limBox.style.fontSize = '0.8rem';
+        limBox.style.color = 'var(--text-muted)';
+        const limTitle = document.createElement('div');
+        limTitle.style.fontWeight = '600';
+        limTitle.textContent = 'Biomechanical Analysis Limitations:';
+        limBox.appendChild(limTitle);
+        phaseFeedback.biomechanical_limitations.forEach(limText => {
+          const lp = document.createElement('div');
+          lp.textContent = '• ' + limText;
+          limBox.appendChild(lp);
+        });
+        sessionContainer.appendChild(limBox);
+      }
       const feedbackMap = {};
       (feedback.attempts || []).forEach(event => { feedbackMap[event.attempt_id] = event; });
 
@@ -603,6 +717,102 @@ INDEX_HTML = """<!DOCTYPE html>
               postDiv.appendChild(p);
             });
             tdExpl.appendChild(postDiv);
+          }
+
+          // Phase-localized review cues and seek actions
+          const phaseAtt = phaseFeedbackMap[att.attempt_id];
+          if (phaseAtt) {
+            const phaseBlock = document.createElement('div');
+            phaseBlock.className = 'phase-feedback-block';
+            phaseBlock.style.marginTop = '6px';
+            phaseBlock.style.paddingTop = '6px';
+            phaseBlock.style.borderTop = '1px dashed var(--card-border)';
+
+            if (phaseAtt.phase_analysis_available === true) {
+              const cues = Array.isArray(phaseAtt.review_cues) ? phaseAtt.review_cues : [];
+              if (cues.length > 0) {
+                const cuesDiv = document.createElement('div');
+                cuesDiv.style.fontSize = '0.82rem';
+                cues.forEach(cueText => {
+                  const cp = document.createElement('div');
+                  cp.textContent = '• ' + cueText;
+                  cuesDiv.appendChild(cp);
+                });
+                phaseBlock.appendChild(cuesDiv);
+              }
+
+              const btnContainer = document.createElement('div');
+              btnContainer.style.display = 'flex';
+              btnContainer.style.flexWrap = 'wrap';
+              btnContainer.style.gap = '6px';
+              btnContainer.style.marginTop = '6px';
+              btnContainer.style.alignItems = 'center';
+
+              let hasTimestampAction = false;
+
+              if (phaseAtt.min_knee_point) {
+                const tKnee = phaseAtt.min_knee_point.video_time_s;
+                if (isValidTimestamp(tKnee)) {
+                  hasTimestampAction = true;
+                  const btn = document.createElement('button');
+                  btn.type = 'button';
+                  btn.className = 'btn-seek';
+                  btn.textContent = 'Seek turnaround (' + Number(tKnee).toFixed(2) + 's)';
+                  btn.title = 'Seek video to turnaround candidate point';
+                  btn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    seekVideoToTime(tKnee);
+                  });
+                  btnContainer.appendChild(btn);
+                } else {
+                  hasTimestampAction = true;
+                  const noTime = document.createElement('span');
+                  noTime.style.fontSize = '0.78rem';
+                  noTime.style.color = 'var(--text-muted)';
+                  noTime.textContent = 'Turnaround: no timestamp';
+                  btnContainer.appendChild(noTime);
+                }
+              }
+
+              if (phaseAtt.return_phase) {
+                const tRet = phaseAtt.return_phase.delta_start_time_s;
+                if (isValidTimestamp(tRet)) {
+                  hasTimestampAction = true;
+                  const btn = document.createElement('button');
+                  btn.type = 'button';
+                  btn.className = 'btn-seek';
+                  btn.textContent = 'Seek return (' + Number(tRet).toFixed(2) + 's)';
+                  btn.title = 'Seek video to return phase start';
+                  btn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    seekVideoToTime(tRet);
+                  });
+                  btnContainer.appendChild(btn);
+                } else if (phaseAtt.return_phase.delta_start_frame != null) {
+                  hasTimestampAction = true;
+                  const noTime = document.createElement('span');
+                  noTime.style.fontSize = '0.78rem';
+                  noTime.style.color = 'var(--text-muted)';
+                  noTime.textContent = 'Return phase: no timestamp';
+                  btnContainer.appendChild(noTime);
+                }
+              }
+
+              if (hasTimestampAction) {
+                phaseBlock.appendChild(btnContainer);
+              }
+            } else if (phaseAtt.phase_analysis_available === false) {
+              const suppDiv = document.createElement('div');
+              suppDiv.style.fontSize = '0.8rem';
+              suppDiv.style.color = 'var(--text-muted)';
+              const suppReason = (phaseAtt.suppression_reason || 'suppressed').replace(/_/g, ' ');
+              suppDiv.textContent = 'Phase review: ' + suppReason;
+              phaseBlock.appendChild(suppDiv);
+            }
+
+            tdExpl.appendChild(phaseBlock);
           }
 
           row.appendChild(tdExpl);
