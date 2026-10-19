@@ -44,6 +44,7 @@ class ExperimentConfig:
     lr0: float = 0.0001
     freeze: int = 0
     warmup_bias_lr: Optional[float] = None
+    kobj: Optional[float] = None
 
 
 def compute_file_sha256(file_path: Path) -> str:
@@ -319,6 +320,7 @@ def generate_experiment_receipt(
             "lr0": config.lr0,
             "freeze": config.freeze,
             "warmup_bias_lr": config.warmup_bias_lr,
+            "kobj": config.kobj,
             "overwrite": config.overwrite,
             "dry_run": config.dry_run,
         },
@@ -410,6 +412,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional warmup bias learning rate in [0, 1]; default None preserves installed Ultralytics default (0.1). Train mode only.",
     )
     parser.add_argument(
+        "--kobj",
+        type=float,
+        default=None,
+        help="Optional keypoint objectness loss gain (finite float >= 0; default None preserves installed Ultralytics default 1.0). Train mode only.",
+    )
+    parser.add_argument(
         "--no-amp",
         action="store_true",
         help="Disable automatic mixed precision (AMP is enabled by default).",
@@ -495,6 +503,18 @@ def run_cli(args: Optional[Sequence[str]] = None) -> int:
             sys.stderr.write("Error: --warmup-bias-lr is only valid in train mode\n")
             return 1
 
+    if parsed.kobj is not None:
+        if (
+            isinstance(parsed.kobj, bool)
+            or not math.isfinite(parsed.kobj)
+            or parsed.kobj < 0.0
+        ):
+            sys.stderr.write("Error: --kobj must be a finite non-negative float\n")
+            return 1
+        if parsed.mode != "train":
+            sys.stderr.write("Error: --kobj is only valid in train mode\n")
+            return 1
+
     config = ExperimentConfig(
         mode=parsed.mode,
         data_yaml=data_path,
@@ -514,6 +534,7 @@ def run_cli(args: Optional[Sequence[str]] = None) -> int:
         lr0=parsed.lr0,
         freeze=parsed.freeze,
         warmup_bias_lr=parsed.warmup_bias_lr,
+        kobj=parsed.kobj,
     )
 
     # Validate dataset
@@ -613,6 +634,8 @@ def run_cli(args: Optional[Sequence[str]] = None) -> int:
             }
             if config.warmup_bias_lr is not None:
                 train_kwargs["warmup_bias_lr"] = config.warmup_bias_lr
+            if config.kobj is not None:
+                train_kwargs["kobj"] = config.kobj
             results = model.train(**train_kwargs)
             extra = {"metrics": results if isinstance(results, dict) else results.results_dict}
             if hasattr(model, "trainer") and hasattr(model.trainer, "args"):

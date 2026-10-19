@@ -229,3 +229,5 @@ Web checks (no inference or downloads):
 The server is a local development application. Do not expose it to a network or run multiple instances against the same output storage. A server restart marks unfinished metadata interrupted; it cannot guarantee recovery from a killed machine or an externally surviving analysis process. Preserve old jobs and inspect running processes before restarting interrupted work.
 
 The training CLI also accepts `--warmup-bias-lr` in train mode for controlled experiments. Omitting it preserves the installed Ultralytics default; an explicit finite value from 0 to 1 is forwarded and recorded in the experiment receipt. Training settings are experimental and do not automatically replace the application model.
+
+For loss-ablation experiments, train mode accepts optional `--kobj` (finite nonnegative keypoint-presence loss gain). An explicit zero disables that loss term; omission preserves the installed default. Shared network updates can still change keypoint confidence. The setting and resolved training arguments are saved in receipts.
