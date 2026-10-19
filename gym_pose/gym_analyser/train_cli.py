@@ -43,6 +43,7 @@ class ExperimentConfig:
     optimizer: str = "AdamW"
     lr0: float = 0.0001
     freeze: int = 0
+    warmup_bias_lr: Optional[float] = None
 
 
 def compute_file_sha256(file_path: Path) -> str:
@@ -317,6 +318,7 @@ def generate_experiment_receipt(
             "optimizer": config.optimizer,
             "lr0": config.lr0,
             "freeze": config.freeze,
+            "warmup_bias_lr": config.warmup_bias_lr,
             "overwrite": config.overwrite,
             "dry_run": config.dry_run,
         },
@@ -402,6 +404,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--lr0", type=float, default=0.0001, help="Initial learning rate; optimizer=auto may override it")
     parser.add_argument("--freeze", type=int, default=0, help="Number of initial model layers to freeze")
     parser.add_argument(
+        "--warmup-bias-lr",
+        type=float,
+        default=None,
+        help="Optional warmup bias learning rate in [0, 1]; default None preserves installed Ultralytics default (0.1). Train mode only.",
+    )
+    parser.add_argument(
         "--no-amp",
         action="store_true",
         help="Disable automatic mixed precision (AMP is enabled by default).",
@@ -475,6 +483,18 @@ def run_cli(args: Optional[Sequence[str]] = None) -> int:
         sys.stderr.write("Error: --lr0 must be finite in (0,1] and --freeze nonnegative\n")
         return 1
 
+    if parsed.warmup_bias_lr is not None:
+        if (
+            isinstance(parsed.warmup_bias_lr, bool)
+            or not math.isfinite(parsed.warmup_bias_lr)
+            or not (0.0 <= parsed.warmup_bias_lr <= 1.0)
+        ):
+            sys.stderr.write("Error: --warmup-bias-lr must be a finite float in [0, 1]\n")
+            return 1
+        if parsed.mode != "train":
+            sys.stderr.write("Error: --warmup-bias-lr is only valid in train mode\n")
+            return 1
+
     config = ExperimentConfig(
         mode=parsed.mode,
         data_yaml=data_path,
@@ -493,6 +513,7 @@ def run_cli(args: Optional[Sequence[str]] = None) -> int:
         optimizer=parsed.optimizer,
         lr0=parsed.lr0,
         freeze=parsed.freeze,
+        warmup_bias_lr=parsed.warmup_bias_lr,
     )
 
     # Validate dataset
@@ -573,23 +594,26 @@ def run_cli(args: Optional[Sequence[str]] = None) -> int:
             )
             extra = {"metrics": results if isinstance(results, dict) else results.results_dict}
         else:
-            results = model.train(
-                data=str(resolved_yaml),
-                epochs=config.epochs,
-                optimizer=config.optimizer,
-                lr0=config.lr0,
-                freeze=config.freeze,
-                batch=config.batch,
-                imgsz=config.imgsz,
-                device=config.device,
-                workers=config.workers,
-                seed=config.seed,
-                amp=config.amp,
-                project=str(config.output_dir),
-                name="train_run",
-                exist_ok=False,
-                deterministic=True,
-            )
+            train_kwargs: Dict[str, Any] = {
+                "data": str(resolved_yaml),
+                "epochs": config.epochs,
+                "optimizer": config.optimizer,
+                "lr0": config.lr0,
+                "freeze": config.freeze,
+                "batch": config.batch,
+                "imgsz": config.imgsz,
+                "device": config.device,
+                "workers": config.workers,
+                "seed": config.seed,
+                "amp": config.amp,
+                "project": str(config.output_dir),
+                "name": "train_run",
+                "exist_ok": False,
+                "deterministic": True,
+            }
+            if config.warmup_bias_lr is not None:
+                train_kwargs["warmup_bias_lr"] = config.warmup_bias_lr
+            results = model.train(**train_kwargs)
             extra = {"metrics": results if isinstance(results, dict) else results.results_dict}
             if hasattr(model, "trainer") and hasattr(model.trainer, "args"):
                 extra["ultralytics_train_args"] = dict(vars(model.trainer.args))

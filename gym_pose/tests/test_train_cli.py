@@ -266,7 +266,7 @@ names:
 
         checkpoint = Path(self.temp_dir) / "mock_pose.pt"
         checkpoint.write_bytes(b"synthetic checkpoint; never loaded")
-        with patch.dict("sys.modules", {"ultralytics": MagicMock(YOLO=mock_yolo_cls)}):
+        with patch.dict("sys.modules", {"ultralytics": MagicMock(YOLO=mock_yolo_cls), "torch": SimpleNamespace(cuda=SimpleNamespace(is_available=lambda: False))}):
             code = run_cli([
                 "--data", str(yaml_path),
                 "--output-dir", str(out),
@@ -302,7 +302,7 @@ names:
 
         checkpoint = Path(self.temp_dir) / "mock_pose.pt"
         checkpoint.write_bytes(b"synthetic checkpoint; never loaded")
-        with patch.dict("sys.modules", {"ultralytics": MagicMock(YOLO=mock_yolo_cls)}):
+        with patch.dict("sys.modules", {"ultralytics": MagicMock(YOLO=mock_yolo_cls), "torch": SimpleNamespace(cuda=SimpleNamespace(is_available=lambda: False))}):
             code = run_cli([
                 "--data", str(yaml_path),
                 "--output-dir", str(out),
@@ -326,6 +326,9 @@ names:
             self.assertTrue(train_call_kwargs["amp"])
             self.assertEqual(train_call_kwargs["optimizer"], "AdamW")
             self.assertEqual(train_call_kwargs["lr0"], 0.0001)
+            self.assertNotIn("warmup_bias_lr", train_call_kwargs)
+            receipt = json.loads((out / "experiment_receipt.json").read_text(encoding="utf-8"))
+            self.assertIsNone(receipt["effective_config"]["warmup_bias_lr"])
 
 
     def test_missing_requested_manifest_is_rejected(self):
@@ -409,6 +412,93 @@ names:
         output = Path(self.temp_dir)/"invalid_label_run"
         self.assertEqual(run_cli(["--data",str(yaml_path),"--output-dir",str(output),"--dry-run"]),1)
         self.assertFalse(output.exists())
+
+    def test_warmup_bias_lr_validation(self) -> None:
+        """Verify bounds checking and mode restriction for --warmup-bias-lr."""
+        yaml_path, _ = self._create_synthetic_dataset()
+
+        # Reject NaN, Inf, negative, and > 1 in train mode
+        for bad_val in ("nan", "inf", "-0.01", "1.01"):
+            out = Path(self.temp_dir) / f"invalid_warmup_{bad_val.replace('.', '_')}"
+            code = run_cli([
+                "--data", str(yaml_path),
+                "--output-dir", str(out),
+                "--mode", "train",
+                "--dry-run",
+                "--warmup-bias-lr", bad_val,
+            ])
+            self.assertEqual(code, 1, f"Expected {bad_val} to be rejected")
+            self.assertFalse(out.exists())
+
+        # Reject --warmup-bias-lr in val mode (optimization flag not valid for validation)
+        out_val = Path(self.temp_dir) / "invalid_warmup_val_mode"
+        code_val = run_cli([
+            "--data", str(yaml_path),
+            "--output-dir", str(out_val),
+            "--mode", "val",
+            "--dry-run",
+            "--warmup-bias-lr", "0.0001",
+        ])
+        self.assertEqual(code_val, 1)
+        self.assertFalse(out_val.exists())
+
+        # Accept valid boundaries [0, 1] in train mode dry-run
+        for valid_val, expected in [("0.0", 0.0), ("1.0", 1.0), ("0.0001", 0.0001)]:
+            out_valid = Path(self.temp_dir) / f"valid_warmup_{str(expected).replace('.', '_')}"
+            code_ok = run_cli([
+                "--data", str(yaml_path),
+                "--output-dir", str(out_valid),
+                "--mode", "train",
+                "--dry-run",
+                "--warmup-bias-lr", valid_val,
+            ])
+            self.assertEqual(code_ok, 0)
+            receipt = json.loads((out_valid / "experiment_receipt.json").read_text(encoding="utf-8"))
+            self.assertEqual(receipt["effective_config"]["warmup_bias_lr"], expected)
+
+    @patch("gym_analyser.train_cli.get_environment_info")
+    def test_warmup_bias_lr_forwarding_and_receipt(self, mock_env: MagicMock) -> None:
+        """Verify explicit --warmup-bias-lr forwards to model.train and records in receipts."""
+        mock_env.return_value = {"platform": "mock_platform"}
+        yaml_path, _ = self._create_synthetic_dataset()
+        out = Path(self.temp_dir) / "train_warmup_explicit_out"
+
+        mock_yolo_cls = MagicMock()
+        mock_model_instance = MagicMock()
+        mock_yolo_cls.return_value = mock_model_instance
+        mock_model_instance.task = "pose"
+        mock_model_instance.trainer.args = SimpleNamespace(
+            optimizer="AdamW", lr0=0.0001, freeze=22, warmup_bias_lr=0.0001
+        )
+        mock_model_instance.train.return_value = {"final_loss": 0.08}
+
+        checkpoint = Path(self.temp_dir) / "mock_pose.pt"
+        checkpoint.write_bytes(b"synthetic checkpoint")
+        with patch.dict("sys.modules", {"ultralytics": MagicMock(YOLO=mock_yolo_cls), "torch": SimpleNamespace(cuda=SimpleNamespace(is_available=lambda: False))}):
+            code = run_cli([
+                "--data", str(yaml_path),
+                "--output-dir", str(out),
+                "--mode", "train",
+                "--model", str(checkpoint),
+                "--device", "cpu",
+                "--imgsz", "320",
+                "--batch", "4",
+                "--epochs", "10",
+                "--workers", "0",
+                "--seed", "42",
+                "--optimizer", "AdamW",
+                "--lr0", "0.0001",
+                "--freeze", "22",
+                "--warmup-bias-lr", "0.0001",
+            ])
+            self.assertEqual(code, 0)
+            mock_model_instance.train.assert_called_once()
+            train_kwargs = mock_model_instance.train.call_args[1]
+            self.assertEqual(train_kwargs.get("warmup_bias_lr"), 0.0001)
+
+            receipt = json.loads((out / "experiment_receipt.json").read_text(encoding="utf-8"))
+            self.assertEqual(receipt["effective_config"]["warmup_bias_lr"], 0.0001)
+            self.assertEqual(receipt["results"]["ultralytics_train_args"]["warmup_bias_lr"], 0.0001)
 
 
 if __name__ == "__main__":
