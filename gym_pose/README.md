@@ -199,3 +199,29 @@ The pipeline writes `posture_summary.json` alongside `attempts.json`. For each o
 The observer detects software-defined movements and does not classify exercise intent. In the reviewed kettlebell example, weight pickup and weight return also create uncounted events. Treat these as observed movements requiring context, not confirmed failed squats. No automatic torso-angle cutoff removes them. Posture summaries remain descriptive; validated technique critique is still pending.
 
 A five-epoch fine-tuning experiment on the expanded exploratory dataset improved validation pose localization scores but regressed the kettlebell example from six counted repetitions to seven and reduced posture measurement coverage. The extra count occurred during weight return. The pretrained application checkpoint remains in use; a better pose metric alone is insufficient for model promotion. Training artifacts and experimental weights remain local and ignored.
+
+## Local web interface
+
+The optional local interface uploads a video, runs the existing analyser, shows movement counts and per-event posture observations, and offers result downloads. It binds to localhost and allows one analysis at a time. These observations are projected 2D measurements; validated form grading and broader accuracy evaluation remain future work.
+
+Keep web dependencies separate from the inference environment on Windows:
+
+```powershell
+python -m venv .venv_web
+.\.venv_web\Scripts\python.exe -m pip install -r requirements-web.txt
+.\.venv_web\Scripts\python.exe -m gym_analyser.web --port 8000 --device cpu
+```
+
+Open http://127.0.0.1:8000. With the configured CUDA environment, use `--device 0`. Analysis uses the existing `.venv_cuda` interpreter when present, otherwise `.venv`, then the current interpreter. Prepare the inference dependencies separately using the installation instructions above. The pretrained checkpoint must already exist at `models/yolo11n-pose.pt`; the web worker does not automatically download a missing model. It does not select experimental fine-tuned checkpoints automatically.
+
+Uploads are limited to 200 MB and stored privately under ignored `output/web_jobs/`. Each job gets separate input/results folders. A result URL includes its job ID so reloading can restore results. Incomplete decoding is shown explicitly; counts from an incomplete run are partial observations. Uncounted events can include setup or weight-return movements and do not establish poor form.
+
+If FFmpeg with the `libx264` encoder is available on PATH, a separate H.264 `preview.mp4` is generated for browser playback; the original annotated video is preserved. Without FFmpeg or if encoding fails, the original remains downloadable. Preview encoding has a finite timeout. No FFmpeg binary is bundled in this repository.
+
+Web checks (no inference or downloads):
+
+```powershell
+.\.venv_web\Scripts\python.exe -m unittest tests.test_web tests.test_web_media
+```
+
+The server is a local development application. Do not expose it to a network or run multiple instances against the same output storage. A server restart marks unfinished metadata interrupted; it cannot guarantee recovery from a killed machine or an externally surviving analysis process. Preserve old jobs and inspect running processes before restarting interrupted work.
