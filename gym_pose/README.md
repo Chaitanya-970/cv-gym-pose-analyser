@@ -260,3 +260,16 @@ Files stay in ignored output/human_reviews/ regardless of the launch directory. 
 
 
 The raw review workspace also supports optional human event annotations: explicitly choose an observed event class, enter known start/turnaround/end times or capture the raw player time, and record uncertainty or visible-posture notes. Unknown times remain blank; human count remains a separate explicit input. Saving unrelated notes preserves existing legacy annotations. New event exports use events_schema_version1. These are reviewer observations, not generated ground truth; record prior exposure to predictions honestly.
+
+
+## Temporal evaluation of saved human-reviewed cases
+
+From this directory, after preparing a frozen review plan and its accepted execution outputs:
+
+```powershell
+.\.venv\Scripts\python.exe -m gym_analyser.temporal_evaluation --plan PATH_TO_PLAN --execution PATH_TO_EXECUTION --output-dir FRESH_OUTPUT_PATH
+```
+
+This standard-library CLI performs no inference. It checks frozen source/model/annotation identities, receipt configuration and a common completed cohort, then writes JSON, CSV and a text summary. Invalid or missing outputs are excluded; empty scorable cohorts report `not_ready` with null metrics. Files are rechecked before publication. Destinations must be fresh.
+
+Matching uses a declared deterministic greedy policy. Missing timestamps remain unknown; ambiguous events and unlabelled intervals do not establish false positives. Metrics describe agreement on scorable annotated events, with explicit boundary coverage, rather than exhaustive video accuracy. Upstream receipts do not sign individual prediction files; recorded input hashes identify the bytes consumed. These tools do not replace human review or establish final model quality.
