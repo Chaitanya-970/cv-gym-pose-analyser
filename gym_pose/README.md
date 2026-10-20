@@ -273,3 +273,22 @@ From this directory, after preparing a frozen review plan and its accepted execu
 This standard-library CLI performs no inference. It checks frozen source/model/annotation identities, receipt configuration and a common completed cohort, then writes JSON, CSV and a text summary. Invalid or missing outputs are excluded; empty scorable cohorts report `not_ready` with null metrics. Files are rechecked before publication. Destinations must be fresh.
 
 Matching uses a declared deterministic greedy policy. Missing timestamps remain unknown; ambiguous events and unlabelled intervals do not establish false positives. Metrics describe agreement on scorable annotated events, with explicit boundary coverage, rather than exhaustive video accuracy. Upstream receipts do not sign individual prediction files; recorded input hashes identify the bytes consumed. These tools do not replace human review or establish final model quality.
+
+
+## Read-only local checks
+
+From this directory, check discoverable launch prerequisites without importing ML packages or loading a model:
+
+```powershell
+.\.venv\Scripts\python.exe -m gym_analyser.local_preflight --json
+```
+
+This checks interpreter/module discovery, package metadata, the original checkpoint hash and storage separation. It does not verify runtime/ABI/CUDA execution or human-evaluation readiness. Optional FFmpeg metadata does not prove an encoder works.
+
+Audit saved analysis JSON/CSV consistency without running inference:
+
+```powershell
+.\.venv\Scripts\python.exe -m gym_analyser.result_audit --results-dir PATH_TO_RESULTS --output-report FRESH_REPORT.json
+```
+
+The report distinguishes failed/incomplete runs, contradictory counts/references and unavailable checks. Consumed JSON/CSV files are hashed; other media is checked by file metadata, not fully decoded or byte-verified. Reports require fresh destinations outside input storage. Internal consistency does not establish counting accuracy, movement intent or useful posture feedback.
