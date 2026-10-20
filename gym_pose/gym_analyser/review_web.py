@@ -36,6 +36,7 @@ except ImportError:
 try:
     from gym_pose.gym_analyser.review_store import (
         ALLOWED_CYCLES,
+        ALLOWED_EVENT_CLASSES,
         ALLOWED_EXTENSIONS,
         ALLOWED_GROUPS,
         ALLOWED_INTENTS,
@@ -455,6 +456,48 @@ INDEX_HTML = """<!DOCTYPE html>
     .events-table-wrapper table td {
       padding: 6px 8px;
     }
+    .events-table-wrapper input[type="text"],
+    .events-table-wrapper input[type="number"],
+    .events-table-wrapper select {
+      padding: 4px 6px;
+      font-size: 0.82rem;
+      min-width: 0;
+    }
+    .time-capture-cell {
+      display: flex;
+      gap: 4px;
+      align-items: center;
+    }
+    .time-capture-cell input {
+      flex: 1;
+      min-width: 60px;
+    }
+    .btn-capture {
+      padding: 3px 6px;
+      font-size: 0.75rem;
+      line-height: 1;
+    }
+    .btn-remove-event {
+      padding: 2px 8px;
+      font-size: 1rem;
+      line-height: 1;
+    }
+    .btn:focus,
+    button:focus {
+      outline: 2px solid var(--primary);
+      outline-offset: 1px;
+    }
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
     .empty-state {
       text-align: center;
       padding: 24px 12px;
@@ -646,24 +689,70 @@ INDEX_HTML = """<!DOCTYPE html>
             </div>
 
             <div class="form-group">
-              <label>Movement Events (Timestamps & Observations):</label>
+              <label id="events-table-heading">Movement Temporal Events (Repetitions & Actions):</label>
               <div class="events-table-wrapper">
-                <table>
+                <table aria-labelledby="events-table-heading">
                   <thead>
                     <tr>
-                      <th style="width: 90px;">Start (s)</th>
-                      <th style="width: 90px;">End (s)</th>
-                      <th style="width: 140px;">Intent</th>
-                      <th style="width: 120px;">Cycle</th>
-                      <th>Observation</th>
-                      <th style="width: 45px;"></th>
+                      <th style="min-width: 90px;">Event ID</th>
+                      <th style="min-width: 140px;">Event Class</th>
+                      <th style="min-width: 110px;">Start (s)</th>
+                      <th style="min-width: 110px;">Turnaround (s)</th>
+                      <th style="min-width: 110px;">End (s)</th>
+                      <th style="min-width: 140px;">Posture Observations</th>
+                      <th style="min-width: 140px;">Uncertainty Notes</th>
+                      <th style="width: 40px;"><span class="sr-only">Actions</span></th>
                     </tr>
                   </thead>
                   <tbody id="events-tbody">
                   </tbody>
                 </table>
               </div>
-              <button type="button" id="btn-add-event" class="btn btn-secondary btn-sm">+ Add Event</button>
+              <button type="button" id="btn-add-event" class="btn btn-secondary btn-sm" aria-label="Add new temporal event">+ Add Event</button>
+
+              <template id="event-row-template">
+                <tr>
+                  <td>
+                    <input type="text" class="event-id" placeholder="evt_1" aria-label="Event ID" title="Event ID">
+                  </td>
+                  <td>
+                    <select class="event-class" aria-label="Event Class" title="Event Class">
+                      <option value="">Choose an observation...</option>
+                      <option value="completed_rep">completed_rep</option>
+                      <option value="setup_or_weight_return">setup_or_weight_return</option>
+                      <option value="partial_or_unfinished">partial_or_unfinished</option>
+                      <option value="ambiguous_or_unclear">ambiguous_or_unclear</option>
+                    </select>
+                  </td>
+                  <td>
+                    <div class="time-capture-cell">
+                      <input type="number" step="any" min="0" class="event-start" data-action="capture-time" data-target="start" placeholder="0.0" aria-label="Start time (s)" title="Start time in seconds">
+                      <button type="button" class="btn btn-secondary btn-sm btn-capture" data-action="capture-time" data-target="start" title="Capture current video time for start" aria-label="Capture start time">&darr;</button>
+                    </div>
+                  </td>
+                  <td>
+                    <div class="time-capture-cell">
+                      <input type="number" step="any" min="0" class="event-turnaround" data-action="capture-time" data-target="turnaround" placeholder="null" aria-label="Turnaround time (s)" title="Turnaround inflection time in seconds">
+                      <button type="button" class="btn btn-secondary btn-sm btn-capture" data-action="capture-time" data-target="turnaround" title="Capture current video time for turnaround" aria-label="Capture turnaround time">&darr;</button>
+                    </div>
+                  </td>
+                  <td>
+                    <div class="time-capture-cell">
+                      <input type="number" step="any" min="0" class="event-end" data-action="capture-time" data-target="end" placeholder="0.0" aria-label="End time (s)" title="End time in seconds">
+                      <button type="button" class="btn btn-secondary btn-sm btn-capture" data-action="capture-time" data-target="end" title="Capture current video time for end" aria-label="Capture end time">&darr;</button>
+                    </div>
+                  </td>
+                  <td>
+                    <input type="text" class="event-posture event-obs" maxlength="5000" placeholder="Posture observations..." aria-label="Visible posture observations" title="Visible posture observations">
+                  </td>
+                  <td>
+                    <input type="text" class="event-uncertainty" maxlength="5000" placeholder="Uncertainty notes..." aria-label="Uncertainty notes" title="Uncertainty notes">
+                  </td>
+                  <td>
+                    <button type="button" class="btn btn-danger btn-sm btn-remove-event" title="Remove Event" aria-label="Remove Event">&times;</button>
+                  </td>
+                </tr>
+              </template>
             </div>
 
             <div class="btn-group" style="margin-top: 16px;">
@@ -724,6 +813,10 @@ INDEX_HTML = """<!DOCTYPE html>
     // DOM references
     const casesTbody = hasDoc ? document.getElementById('cases-tbody') : null;
     const player = hasDoc ? document.getElementById('player') : null;
+    const videoPlayer = player;
+    if (typeof window !== 'undefined') {
+      window.videoPlayer = player;
+    }
     const rawDownloadLink = hasDoc ? document.getElementById('raw-download-link') : null;
     const uploadForm = hasDoc ? document.getElementById('upload-form') : null;
     const uploadFile = hasDoc ? document.getElementById('upload-file') : null;
@@ -1016,87 +1109,176 @@ INDEX_HTML = """<!DOCTYPE html>
     function addEventRow(ev = {}, idx = null) {
       if (!eventsTbody) return;
       const tr = document.createElement('tr');
+      tr._originalEvent = JSON.parse(JSON.stringify(ev));
+      tr._legacyEvent = Object.prototype.hasOwnProperty.call(ev, 'event_index') && !ev.event_id;
 
-      // Start Time
-      const tdStart = document.createElement('td');
-      const inStart = document.createElement('input');
-      inStart.type = 'number';
-      inStart.min = '0';
-      inStart.step = 'any';
-      inStart.className = 'event-start';
-      inStart.value = (ev.start_time_s !== undefined && ev.start_time_s !== null) ? ev.start_time_s : '0.0';
-      inStart.addEventListener('input', markUnsaved);
-      tdStart.appendChild(inStart);
+      // 1. Event ID
+      const tdId = document.createElement('td');
+      const inId = document.createElement('input');
+      inId.type = 'text';
+      inId.className = 'event-id';
+      inId.setAttribute('aria-label', 'Event ID');
+      inId.setAttribute('title', 'Event ID');
+      let defaultId = '';
+      if (ev.event_id) {
+        defaultId = String(ev.event_id);
+      } else if (idx !== null && idx !== undefined) {
+        defaultId = 'evt_' + (idx + 1);
+      } else {
+        const rowCount = eventsTbody.querySelectorAll ? eventsTbody.querySelectorAll('tr').length : 0;
+        const used = new Set(Array.from(eventsTbody.querySelectorAll('.event-id')).map(input => input.value));
+        let number = rowCount + 1;
+        while (used.has('evt_' + number)) number++;
+        defaultId = 'evt_' + number;
+      }
+      inId.value = defaultId;
+      inId.placeholder = defaultId;
+      inId.addEventListener('input', markUnsaved);
+      tdId.appendChild(inId);
 
-      // End Time
-      const tdEnd = document.createElement('td');
-      const inEnd = document.createElement('input');
-      inEnd.type = 'number';
-      inEnd.min = '0';
-      inEnd.step = 'any';
-      inEnd.className = 'event-end';
-      inEnd.value = (ev.end_time_s !== undefined && ev.end_time_s !== null) ? ev.end_time_s : '0.0';
-      inEnd.addEventListener('input', markUnsaved);
-      tdEnd.appendChild(inEnd);
-
-      // Intent Dropdown
-      const tdIntent = document.createElement('td');
-      const selIntent = document.createElement('select');
-      selIntent.className = 'event-intent';
-      ['intentional_squat', 'setup_return', 'uncertain'].forEach(optVal => {
+      // 2. Event Class Select
+      const tdClass = document.createElement('td');
+      const selClass = document.createElement('select');
+      selClass.className = 'event-class';
+      selClass.setAttribute('aria-label', 'Event Class');
+      selClass.setAttribute('title', 'Event Class');
+      const classOptions = [
+        'completed_rep',
+        'setup_or_weight_return',
+        'partial_or_unfinished',
+        'ambiguous_or_unclear'
+      ];
+      let selectedClass = ev.event_class && classOptions.includes(ev.event_class) ? ev.event_class : '';
+      const placeholder = document.createElement('option');
+      placeholder.value = '';
+      placeholder.textContent = tr._legacyEvent
+        ? 'Legacy observation (preserved unless explicitly reclassified)'
+        : 'Choose an observation...';
+      placeholder.selected = !selectedClass;
+      selClass.appendChild(placeholder);
+      classOptions.forEach(optVal => {
         const opt = document.createElement('option');
         opt.value = optVal;
         opt.textContent = optVal;
-        if (ev.intent === optVal) opt.selected = true;
-        selIntent.appendChild(opt);
+        if (optVal === selectedClass) opt.selected = true;
+        selClass.appendChild(opt);
       });
-      selIntent.addEventListener('change', markUnsaved);
-      tdIntent.appendChild(selIntent);
+      selClass.addEventListener('change', markUnsaved);
+      tdClass.appendChild(selClass);
 
-      // Cycle Dropdown
-      const tdCycle = document.createElement('td');
-      const selCycle = document.createElement('select');
-      selCycle.className = 'event-cycle';
-      ['complete', 'incomplete', 'uncertain'].forEach(optVal => {
-        const opt = document.createElement('option');
-        opt.value = optVal;
-        opt.textContent = optVal;
-        if (ev.cycle === optVal) opt.selected = true;
-        selCycle.appendChild(opt);
-      });
-      selCycle.addEventListener('change', markUnsaved);
-      tdCycle.appendChild(selCycle);
+      // Helper for time capture cell
+      function createTimeCell(className, targetName, initialVal, placeholder, label) {
+        const td = document.createElement('td');
+        const wrapper = document.createElement('div');
+        wrapper.className = 'time-capture-cell';
 
-      // Observation
-      const tdObs = document.createElement('td');
-      const inObs = document.createElement('input');
-      inObs.type = 'text';
-      inObs.maxLength = 500;
-      inObs.className = 'event-obs';
-      inObs.placeholder = 'Event notes...';
-      inObs.value = ev.observation || '';
-      inObs.addEventListener('input', markUnsaved);
-      tdObs.appendChild(inObs);
+        const input = document.createElement('input');
+        input.type = 'number';
+        input.step = 'any';
+        input.min = '0';
+        input.className = className;
+        input.setAttribute('data-action', 'capture-time');
+        input.setAttribute('data-target', targetName);
+        input.setAttribute('aria-label', label);
+        input.setAttribute('title', label);
+        input.placeholder = placeholder;
+        if (initialVal !== undefined && initialVal !== null && initialVal !== '') {
+          input.value = String(initialVal);
+        } else {
+          input.value = '';
+        }
+        input.addEventListener('input', markUnsaved);
 
-      // Remove Button
+        const btnCapture = document.createElement('button');
+        btnCapture.type = 'button';
+        btnCapture.className = 'btn btn-secondary btn-sm btn-capture';
+        btnCapture.setAttribute('data-action', 'capture-time');
+        btnCapture.setAttribute('data-target', targetName);
+        btnCapture.setAttribute('title', 'Capture video time for ' + targetName);
+        btnCapture.setAttribute('aria-label', 'Capture ' + targetName + ' time');
+        btnCapture.textContent = '\u2193';
+        btnCapture.addEventListener('click', () => {
+          const vid = player || (typeof document !== 'undefined' ? document.getElementById('player') : null);
+          if (vid && Number.isFinite(vid.currentTime)) {
+            const captured = Number(vid.currentTime.toFixed(3));
+            input.value = String(captured);
+            markUnsaved();
+          }
+        });
+
+        wrapper.appendChild(input);
+        wrapper.appendChild(btnCapture);
+        td.appendChild(wrapper);
+        return { td, input };
+      }
+
+      // 3. Start Time
+      const startCell = createTimeCell('event-start', 'start', ev.start_time_s, '0.0', 'Start time (s)');
+
+      // 4. Turnaround Time
+      const turnCell = createTimeCell('event-turnaround', 'turnaround', ev.turnaround_time_s, 'null', 'Turnaround time (s)');
+
+      // 5. End Time
+      const endCell = createTimeCell('event-end', 'end', ev.end_time_s, '0.0', 'End time (s)');
+
+      // 6. Visible Posture Observations
+      const tdPosture = document.createElement('td');
+      const inPosture = document.createElement('input');
+      inPosture.type = 'text';
+      inPosture.maxLength = 5000;
+      inPosture.className = 'event-posture event-obs';
+      inPosture.setAttribute('aria-label', 'Visible posture observations');
+      inPosture.setAttribute('title', 'Visible posture observations');
+      inPosture.placeholder = 'Posture observations...';
+      let obsText = '';
+      if (typeof ev.visible_posture_observations === 'string') {
+        obsText = ev.visible_posture_observations;
+      } else if (ev.visible_posture_observations && typeof ev.visible_posture_observations === 'object') {
+        obsText = JSON.stringify(ev.visible_posture_observations);
+      } else if (ev.observation) {
+        obsText = String(ev.observation);
+      }
+      inPosture.value = obsText;
+      inPosture.addEventListener('input', markUnsaved);
+      tdPosture.appendChild(inPosture);
+
+      // 7. Uncertainty Notes
+      const tdUncertainty = document.createElement('td');
+      const inUncertainty = document.createElement('input');
+      inUncertainty.type = 'text';
+      inUncertainty.maxLength = 5000;
+      inUncertainty.className = 'event-uncertainty';
+      inUncertainty.setAttribute('aria-label', 'Uncertainty notes');
+      inUncertainty.setAttribute('title', 'Uncertainty notes');
+      inUncertainty.placeholder = 'Uncertainty notes...';
+      inUncertainty.value = ev.uncertainty_notes ? String(ev.uncertainty_notes) : '';
+      inUncertainty.addEventListener('input', markUnsaved);
+      tdUncertainty.appendChild(inUncertainty);
+
+      // 8. Remove Button
       const tdRemove = document.createElement('td');
       const btnRemove = document.createElement('button');
       btnRemove.type = 'button';
-      btnRemove.className = 'btn btn-danger btn-sm';
-      btnRemove.textContent = '×';
+      btnRemove.className = 'btn btn-danger btn-sm btn-remove-event';
+      btnRemove.textContent = '\u00D7';
       btnRemove.title = 'Remove Event';
+      btnRemove.setAttribute('aria-label', 'Remove Event');
       btnRemove.addEventListener('click', () => {
         tr.remove();
         markUnsaved();
       });
       tdRemove.appendChild(btnRemove);
 
-      tr.appendChild(tdStart);
-      tr.appendChild(tdEnd);
-      tr.appendChild(tdIntent);
-      tr.appendChild(tdCycle);
-      tr.appendChild(tdObs);
+      tr.appendChild(tdId);
+      tr.appendChild(tdClass);
+      tr.appendChild(startCell.td);
+      tr.appendChild(turnCell.td);
+      tr.appendChild(endCell.td);
+      tr.appendChild(tdPosture);
+      tr.appendChild(tdUncertainty);
       tr.appendChild(tdRemove);
+
+      tr._initialValues = JSON.stringify(Array.from(tr.querySelectorAll('input, select')).map(input => input.value));
       eventsTbody.appendChild(tr);
     }
 
@@ -1228,34 +1410,98 @@ INDEX_HTML = """<!DOCTYPE html>
 
         // Events collection with finite timestamp validation
         const events = [];
-        const eventRows = eventsTbody.querySelectorAll('tr');
+        const eventRows = eventsTbody && eventsTbody.querySelectorAll ? eventsTbody.querySelectorAll('tr') : [];
+        const seenEventIds = new Set();
+
         for (let i = 0; i < eventRows.length; i++) {
           const row = eventRows[i];
+          const idInput = row.querySelector('.event-id');
+          const classSelect = row.querySelector('.event-class');
           const startInput = row.querySelector('.event-start');
+          const turnInput = row.querySelector('.event-turnaround');
           const endInput = row.querySelector('.event-end');
-          const startVal = Number(startInput.value);
-          const endVal = Number(endInput.value);
-          const intent = row.querySelector('.event-intent').value;
-          const cycle = row.querySelector('.event-cycle').value;
-          const obs = row.querySelector('.event-obs').value.trim();
+          const postureInput = row.querySelector('.event-posture') || row.querySelector('.event-obs');
+          const uncInput = row.querySelector('.event-uncertainty');
 
-          if (!Number.isFinite(startVal) || startVal < 0) {
-            showSafeError(reviewStatus, 'Event ' + (i + 1) + ': Start time must be a finite number >= 0.');
+          const unchangedLegacy = row._legacyEvent &&
+            JSON.stringify(Array.from(row.querySelectorAll('input, select')).map(input => input.value)) === row._initialValues;
+          if (unchangedLegacy) {
+            events.push(JSON.parse(JSON.stringify(row._originalEvent)));
+            continue;
+          }
+          const eventId = idInput && idInput.value ? idInput.value.trim() : '';
+          if (!eventId || seenEventIds.has(eventId)) {
+            showSafeError(reviewStatus, 'Event ' + (i + 1) + ': Supply a unique event ID.');
             return;
           }
-          if (!Number.isFinite(endVal) || endVal < startVal) {
-            showSafeError(reviewStatus, 'Event ' + (i + 1) + ': End time must be a finite number >= start time.');
+          seenEventIds.add(eventId);
+          const eventClass = classSelect ? classSelect.value : '';
+          if (!eventClass) {
+            showSafeError(reviewStatus, 'Event ' + (i + 1) + ': Choose an observation explicitly; unknown/ambiguous is allowed.');
             return;
           }
 
-          events.push({
-            event_index: i,
+          // Timestamps parsing and validation (empty string -> null)
+          let startVal = null;
+          if (startInput && startInput.value.trim() !== '') {
+            startVal = Number(startInput.value);
+            if (!Number.isFinite(startVal) || startVal < 0) {
+              showSafeError(reviewStatus, 'Event ' + (i + 1) + ': Start time must be a finite number >= 0.');
+              return;
+            }
+          }
+
+          let turnVal = null;
+          if (turnInput && turnInput.value.trim() !== '') {
+            turnVal = Number(turnInput.value);
+            if (!Number.isFinite(turnVal) || turnVal < 0) {
+              showSafeError(reviewStatus, 'Event ' + (i + 1) + ': Turnaround time must be a finite number >= 0.');
+              return;
+            }
+          }
+
+          let endVal = null;
+          if (endInput && endInput.value.trim() !== '') {
+            endVal = Number(endInput.value);
+            if (!Number.isFinite(endVal) || endVal < 0) {
+              showSafeError(reviewStatus, 'Event ' + (i + 1) + ': End time must be a finite number >= 0.');
+              return;
+            }
+          }
+
+          // Ordering checks
+          if (startVal !== null && turnVal !== null && turnVal < startVal) {
+            showSafeError(reviewStatus, 'Event ' + (i + 1) + ': Turnaround time cannot be earlier than start time.');
+            return;
+          }
+          if (turnVal !== null && endVal !== null && endVal < turnVal) {
+            showSafeError(reviewStatus, 'Event ' + (i + 1) + ': End time cannot be earlier than turnaround time.');
+            return;
+          }
+          if (startVal !== null && endVal !== null && endVal < startVal) {
+            showSafeError(reviewStatus, 'Event ' + (i + 1) + ': End time cannot be earlier than start time.');
+            return;
+          }
+
+          let postureObs = postureInput && postureInput.value.trim() ? postureInput.value.trim() : null;
+          const originalPosture = row._originalEvent && row._originalEvent.visible_posture_observations;
+          if (originalPosture && typeof originalPosture === 'object' && postureInput.value === JSON.stringify(originalPosture)) {
+            postureObs = JSON.parse(JSON.stringify(originalPosture));
+          }
+          const uncNotes = uncInput && uncInput.value.trim() ? uncInput.value.trim() : null;
+
+          const evtObj = {
+            event_id: eventId,
+            event_class: eventClass,
             start_time_s: startVal,
+            turnaround_time_s: turnVal,
             end_time_s: endVal,
-            intent: intent,
-            cycle: cycle,
-            observation: obs
-          });
+            uncertainty_notes: uncNotes,
+            visible_posture_observations: postureObs,
+
+          };
+
+          events.push(evtObj);
         }
 
         const payload = {
@@ -1265,7 +1511,8 @@ INDEX_HTML = """<!DOCTYPE html>
           raw_video_reviewed: rawReviewed,
           predictions_previously_seen: predsSeen,
           notes: notes,
-          events: events
+          events: events,
+          events_schema_version: 1
         };
 
         setReviewFormDisabled(true);
@@ -1596,10 +1843,15 @@ def create_review_app(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid case ID format. Standard UUID4 required.",
             )
-        # Normalize event_index if omitted in event dictionaries
+        # Normalize event_index if omitted in legacy event dictionaries
         if isinstance(payload, dict) and isinstance(payload.get("events"), list):
             for idx, ev in enumerate(payload["events"]):
-                if isinstance(ev, dict) and "event_index" not in ev:
+                if (
+                    isinstance(ev, dict)
+                    and "event_index" not in ev
+                    and "event_id" not in ev
+                    and "event_class" not in ev
+                ):
                     ev["event_index"] = idx
 
         try:

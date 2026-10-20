@@ -257,3 +257,6 @@ Run from this gym_pose directory, then open http://127.0.0.1:8001. Upload raw MP
 Downloads include evaluator-compatible counts and a full review manifest with source hashes and edit history. Development cases and out-of-scope clips are excluded from count scoring. Candidate status alone does not establish independent final-test eligibility. Prepare any final evaluation protocol separately.
 
 Files stay in ignored output/human_reviews/ regardless of the launch directory. Modified raw files or corrupted metadata block serving/saving/export rather than silently changing labels. Keep original recordings and use one server process. Unsupported browser codecs require an external player through the raw download; this tool does not transcode videos.
+
+
+The raw review workspace also supports optional human event annotations: explicitly choose an observed event class, enter known start/turnaround/end times or capture the raw player time, and record uncertainty or visible-posture notes. Unknown times remain blank; human count remains a separate explicit input. Saving unrelated notes preserves existing legacy annotations. New event exports use events_schema_version1. These are reviewer observations, not generated ground truth; record prior exposure to predictions honestly.

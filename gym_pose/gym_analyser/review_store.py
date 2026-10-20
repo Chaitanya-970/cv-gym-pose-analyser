@@ -34,6 +34,12 @@ ALLOWED_GROUPS: Set[str] = {"candidate", "development"}
 ALLOWED_SCOPES: Set[str] = {"in_scope", "out_of_scope", "uncertain"}
 ALLOWED_INTENTS: Set[str] = {"intentional_squat", "setup_return", "uncertain"}
 ALLOWED_CYCLES: Set[str] = {"complete", "incomplete", "uncertain"}
+ALLOWED_EVENT_CLASSES: Set[str] = {
+    "completed_rep",
+    "setup_or_weight_return",
+    "partial_or_unfinished",
+    "ambiguous_or_unclear",
+}
 
 DEFAULT_STORAGE_ROOT: Path = (
     Path(__file__).resolve().parent.parent / "output" / "human_reviews"
@@ -322,93 +328,199 @@ def validate_review_payload(review: Dict[str, Any]) -> Dict[str, Any]:
     if len(notes) > 5000:
         raise ValueError(f"notes must be at most 5000 characters, got {len(notes)}")
 
+    schema_version = review.get("events_schema_version")
+    if schema_version is not None and (type(schema_version) is not int or schema_version != 1):
+        raise ValueError("events_schema_version must be 1 when supplied")
+
     # events validation
-    events_raw = review.get("events", [])
+    events_raw = review.get("events")
     if events_raw is None:
-        events_raw = []
-    if not isinstance(events_raw, list):
-        raise ValueError(f"events must be a list, got {type(events_raw).__name__}")
-    if len(events_raw) > 200:
+        validated_events = None
+    elif not isinstance(events_raw, list):
+        raise ValueError(f"events must be a list or None, got {type(events_raw).__name__}")
+    elif len(events_raw) > 200:
         raise ValueError(f"events list exceeds maximum length of 200, got {len(events_raw)}")
+    else:
+        validated_events_list: List[Dict[str, Any]] = []
+        seen_event_ids: Set[str] = set()
+        seen_indices: Set[int] = set()
 
-    validated_events: List[Dict[str, Any]] = []
-    seen_indices: Set[int] = set()
+        for i, evt in enumerate(events_raw):
+            if not isinstance(evt, dict):
+                raise ValueError(f"Event at index {i} must be a dictionary")
 
-    for i, evt in enumerate(events_raw):
-        if not isinstance(evt, dict):
-            raise ValueError(f"Event at index {i} must be a dictionary")
+            is_new_event = ("event_id" in evt) or ("event_class" in evt)
 
-        # event_index
-        event_index = evt.get("event_index")
-        if isinstance(event_index, bool) or not isinstance(event_index, int) or event_index < 0:
-            raise ValueError(
-                f"Event {i} 'event_index' must be a non-negative integer, got {event_index!r}"
-            )
-        if event_index in seen_indices:
-            raise ValueError(
-                f"Duplicate event_index {event_index} detected in events at position {i}"
-            )
-        seen_indices.add(event_index)
+            if is_new_event:
+                # event_id: non-empty string, unique within case review
+                event_id = evt.get("event_id")
+                if not isinstance(event_id, str) or not event_id.strip():
+                    raise ValueError(
+                        f"Event {i} 'event_id' must be a non-empty string, got {event_id!r}"
+                    )
+                event_id = event_id.strip()
+                if event_id in seen_event_ids:
+                    raise ValueError(
+                        f"Duplicate event_id {event_id!r} detected in events at position {i}"
+                    )
+                seen_event_ids.add(event_id)
 
-        # start_time_s
-        st = evt.get("start_time_s")
-        if isinstance(st, bool) or not isinstance(st, (int, float)):
-            raise ValueError(
-                f"Event {i} 'start_time_s' must be a finite number >= 0.0, got {st!r}"
-            )
-        if not math.isfinite(st) or st < 0.0:
-            raise ValueError(
-                f"Event {i} 'start_time_s' must be finite and >= 0.0, got {st}"
-            )
+                # event_class: in ALLOWED_EVENT_CLASSES
+                event_class = evt.get("event_class")
+                if not isinstance(event_class, str) or event_class not in ALLOWED_EVENT_CLASSES:
+                    raise ValueError(
+                        f"Event {i} 'event_class' must be one of {sorted(ALLOWED_EVENT_CLASSES)}, got {event_class!r}"
+                    )
 
-        # end_time_s
-        et = evt.get("end_time_s")
-        if isinstance(et, bool) or not isinstance(et, (int, float)):
-            raise ValueError(
-                f"Event {i} 'end_time_s' must be a finite number >= start_time_s, got {et!r}"
-            )
-        if not math.isfinite(et) or et < st:
-            raise ValueError(
-                f"Event {i} 'end_time_s' ({et}) must be finite and >= start_time_s ({st})"
-            )
+                # timestamps: start_time_s, turnaround_time_s, end_time_s
+                parsed_times: Dict[str, Optional[float]] = {}
+                for ts_name in ("start_time_s", "turnaround_time_s", "end_time_s"):
+                    ts_val = evt.get(ts_name)
+                    if ts_val is not None:
+                        if isinstance(ts_val, bool) or not isinstance(ts_val, (int, float)):
+                            raise ValueError(
+                                f"Event {i} '{ts_name}' must be a finite number >= 0.0 or None, got {ts_val!r}"
+                            )
+                        if not math.isfinite(ts_val) or ts_val < 0.0:
+                            raise ValueError(
+                                f"Event {i} '{ts_name}' must be finite and >= 0.0, got {ts_val}"
+                            )
+                        parsed_times[ts_name] = float(ts_val)
+                    else:
+                        parsed_times[ts_name] = None
 
-        # intent
-        intent = evt.get("intent")
-        if not isinstance(intent, str) or intent not in ALLOWED_INTENTS:
-            raise ValueError(
-                f"Event {i} 'intent' must be one of {sorted(ALLOWED_INTENTS)}, got {intent!r}"
-            )
+                st = parsed_times["start_time_s"]
+                tt = parsed_times["turnaround_time_s"]
+                et = parsed_times["end_time_s"]
 
-        # cycle
-        cycle = evt.get("cycle")
-        if not isinstance(cycle, str) or cycle not in ALLOWED_CYCLES:
-            raise ValueError(
-                f"Event {i} 'cycle' must be one of {sorted(ALLOWED_CYCLES)}, got {cycle!r}"
-            )
+                if st is not None and tt is not None and tt < st:
+                    raise ValueError(
+                        f"Event {i} 'turnaround_time_s' ({tt}) cannot be earlier than 'start_time_s' ({st})"
+                    )
+                if tt is not None and et is not None and et < tt:
+                    raise ValueError(
+                        f"Event {i} 'end_time_s' ({et}) cannot be earlier than 'turnaround_time_s' ({tt})"
+                    )
+                if st is not None and et is not None and et < st:
+                    raise ValueError(
+                        f"Event {i} 'end_time_s' ({et}) cannot be earlier than 'start_time_s' ({st})"
+                    )
 
-        # observation
-        observation = evt.get("observation", "")
-        if observation is None:
-            observation = ""
-        if not isinstance(observation, str):
-            raise ValueError(
-                f"Event {i} 'observation' must be a string, got {type(observation).__name__}"
-            )
-        if len(observation) > 500:
-            raise ValueError(
-                f"Event {i} 'observation' must be at most 500 characters, got {len(observation)}"
-            )
+                # uncertainty_notes: optional string or None
+                uncertainty_notes = evt.get("uncertainty_notes")
+                if uncertainty_notes is not None:
+                    if not isinstance(uncertainty_notes, str):
+                        raise ValueError(
+                            f"Event {i} 'uncertainty_notes' must be a string or None, got {type(uncertainty_notes).__name__}"
+                        )
+                    if len(uncertainty_notes) > 5000:
+                        raise ValueError(
+                            f"Event {i} 'uncertainty_notes' must be at most 5000 characters, got {len(uncertainty_notes)}"
+                        )
 
-        validated_events.append({
-            "event_index": event_index,
-            "start_time_s": float(st),
-            "end_time_s": float(et),
-            "intent": intent,
-            "cycle": cycle,
-            "observation": observation,
-        })
+                # visible_posture_observations: optional dict/string or None
+                visible_posture_obs = evt.get("visible_posture_observations")
+                if visible_posture_obs is not None:
+                    if not isinstance(visible_posture_obs, (str, dict)):
+                        raise ValueError(
+                            f"Event {i} 'visible_posture_observations' must be a dict, string, or None, got {type(visible_posture_obs).__name__}"
+                        )
+                    if isinstance(visible_posture_obs, str) and len(visible_posture_obs) > 5000:
+                        raise ValueError(
+                            f"Event {i} 'visible_posture_observations' string must be at most 5000 characters, got {len(visible_posture_obs)}"
+                        )
+                    if isinstance(visible_posture_obs, dict):
+                        try:
+                            encoded = json.dumps(visible_posture_obs, allow_nan=False)
+                            if len(encoded) > 5000:
+                                raise ValueError("Posture observation object exceeds 5000 characters")
+                            visible_posture_obs = json.loads(encoded)
+                        except (ValueError, TypeError, RecursionError) as exc:
+                            raise ValueError(f"Event {i} posture observations must be finite JSON: {exc}") from exc
 
-    return {
+                validated_events_list.append({
+                    "event_id": event_id,
+                    "event_class": event_class,
+                    "start_time_s": st,
+                    "turnaround_time_s": tt,
+                    "end_time_s": et,
+                    "uncertainty_notes": uncertainty_notes,
+                    "visible_posture_observations": visible_posture_obs,
+                })
+
+            elif "event_index" in evt:
+                # Legacy event format
+                event_index = evt.get("event_index")
+                if isinstance(event_index, bool) or not isinstance(event_index, int) or event_index < 0:
+                    raise ValueError(
+                        f"Event {i} 'event_index' must be a non-negative integer, got {event_index!r}"
+                    )
+                if event_index in seen_indices:
+                    raise ValueError(
+                        f"Duplicate event_index {event_index} detected in events at position {i}"
+                    )
+                seen_indices.add(event_index)
+
+                st_leg = evt.get("start_time_s")
+                if isinstance(st_leg, bool) or not isinstance(st_leg, (int, float)):
+                    raise ValueError(
+                        f"Event {i} 'start_time_s' must be a finite number >= 0.0, got {st_leg!r}"
+                    )
+                if not math.isfinite(st_leg) or st_leg < 0.0:
+                    raise ValueError(
+                        f"Event {i} 'start_time_s' must be finite and >= 0.0, got {st_leg}"
+                    )
+
+                et_leg = evt.get("end_time_s")
+                if isinstance(et_leg, bool) or not isinstance(et_leg, (int, float)):
+                    raise ValueError(
+                        f"Event {i} 'end_time_s' must be a finite number >= start_time_s, got {et_leg!r}"
+                    )
+                if not math.isfinite(et_leg) or et_leg < st_leg:
+                    raise ValueError(
+                        f"Event {i} 'end_time_s' ({et_leg}) must be finite and >= start_time_s ({st_leg})"
+                    )
+
+                intent = evt.get("intent")
+                if not isinstance(intent, str) or intent not in ALLOWED_INTENTS:
+                    raise ValueError(
+                        f"Event {i} 'intent' must be one of {sorted(ALLOWED_INTENTS)}, got {intent!r}"
+                    )
+
+                cycle = evt.get("cycle")
+                if not isinstance(cycle, str) or cycle not in ALLOWED_CYCLES:
+                    raise ValueError(
+                        f"Event {i} 'cycle' must be one of {sorted(ALLOWED_CYCLES)}, got {cycle!r}"
+                    )
+
+                observation = evt.get("observation", "")
+                if observation is None:
+                    observation = ""
+                if not isinstance(observation, str):
+                    raise ValueError(
+                        f"Event {i} 'observation' must be a string, got {type(observation).__name__}"
+                    )
+                if len(observation) > 500:
+                    raise ValueError(
+                        f"Event {i} 'observation' must be at most 500 characters, got {len(observation)}"
+                    )
+
+                validated_events_list.append({
+                    "event_index": event_index,
+                    "start_time_s": float(st_leg),
+                    "end_time_s": float(et_leg),
+                    "intent": intent,
+                    "cycle": cycle,
+                    "observation": observation,
+                })
+            else:
+                raise ValueError(
+                    f"Event at index {i} missing required event fields ('event_id' and 'event_class' required)"
+                )
+
+        validated_events = validated_events_list
+
+    validated = {
         "human_count": human_count,
         "scope": scope,
         "reviewer": reviewer,
@@ -417,6 +529,10 @@ def validate_review_payload(review: Dict[str, Any]) -> Dict[str, Any]:
         "notes": notes,
         "events": validated_events,
     }
+    if schema_version is not None or any("event_id" in event for event in (validated_events or [])):
+        validated["events_schema_version"] = 1
+    return validated
+
 
 
 def load_persisted_case(
@@ -1094,6 +1210,16 @@ class ReviewStore:
 
             return {"clips": clips}
 
+    def export_reviewed_counts(self) -> Dict[str, Any]:
+        """Export reviewed counts formatted for evaluation.load_ground_truth.
+
+        Alias to export_counts for Task 43 compatibility.
+
+        Returns:
+            Standard dictionary {'clips': [{...}]}.
+        """
+        return self.export_counts()
+
     def export_manifest(self) -> Dict[str, Any]:
         """Export a comprehensive review manifest including cases, counts, clips, histories, events, exclusions.
 
@@ -1131,7 +1257,7 @@ class ReviewStore:
             events: List[Dict[str, Any]] = [
                 {"case_id": c["case_id"], **evt}
                 for c in full_cases
-                for evt in c.get("review", {}).get("events", [])
+                for evt in (c.get("review", {}).get("events") or [])
             ]
 
             exclusions: List[Dict[str, Any]] = [
@@ -1174,6 +1300,7 @@ __all__ = [
     "ALLOWED_SCOPES",
     "ALLOWED_INTENTS",
     "ALLOWED_CYCLES",
+    "ALLOWED_EVENT_CLASSES",
     "PUBLIC_CASE_KEYS",
     "CaseNotFoundError",
     "CaseCorruptedError",
