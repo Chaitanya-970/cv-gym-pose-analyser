@@ -385,7 +385,7 @@ def generate_coaching_feedback(
     else:
         tracking_continuity = "insufficient"
 
-    # Camera view adequacy and lateral consistency
+    # Camera view adequacy and tracking side consistency
     tracks_seen: Set[int] = set()
     sides_seen: Set[str] = set()
     has_side_switch_in_attempt = False
@@ -436,7 +436,7 @@ def generate_coaching_feedback(
 
     if len(sides_seen) == 1:
         single_side = next(iter(sides_seen))
-        notes.append(f"Camera maintained a consistent {single_side} lateral view of the exerciser.")
+        notes.append(f"Analysis consistently tracked the {single_side} leg throughout the monitored movements.")
     elif len(sides_seen) > 1 or len(tracks_seen) > 1 or has_side_switch_in_attempt:
         notes.append(
             "Observed movements occurred across multiple tracking contexts or body sides; "
@@ -856,7 +856,7 @@ def generate_coaching_feedback(
                 observations.append({
                     "rule_id": "OBS-TRACKING-01",
                     "category": "tracking",
-                    "message": f"Tracking continuity maintained across {rep_cov_pct:.1f}% of frames on {side_label} lateral view.",
+                    "message": f"Tracking continuity maintained across {rep_cov_pct:.1f}% of frames tracking the {side_label} leg.",
                     "source_id": "session_feedback",
                     "confidence_level": "observed",
                 })
