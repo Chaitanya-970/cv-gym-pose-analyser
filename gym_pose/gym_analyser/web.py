@@ -416,13 +416,13 @@ INDEX_HTML = """<html lang="en">
 
     <!-- Analysis Results Section -->
     <div class="card hidden" id="results-card" role="region" aria-label="Analysis Results">
-      <h2>Analysis Results</h2>
+      <h2 id="results-title">Analysis Results</h2>
       <div id="results-announcement" class="sr-only" role="status" aria-live="polite"></div>
 
       <div class="metrics-grid">
         <div class="metric-card">
           <div class="metric-value" id="metric-reps">0</div>
-          <div class="metric-label">Completed Repetitions</div>
+          <div class="metric-label" id="metric-reps-label">Completed Repetitions</div>
         </div>
         <div class="metric-card">
           <div class="metric-value" id="metric-attempts">0</div>
@@ -538,6 +538,18 @@ INDEX_HTML = """<html lang="en">
   <script>
     const MAX_UPLOAD_BYTES = 200 * 1024 * 1024;
     const ALLOWED_EXTENSIONS = ['.mp4', '.mov', '.avi', '.mkv', '.webm', '.m4v'];
+    const ALLOWED_ARTIFACT_NAMES = [
+      'summary.json',
+      'attempts.json',
+      'posture_summary.json',
+      'feedback_observations.json',
+      'feedback_phases.json',
+      'coaching_feedback.json',
+      'angles.csv',
+      'angle_plot.png',
+      'annotated.mp4',
+      'preview.mp4'
+    ];
 
     const fileInput = document.getElementById('video-input');
     const fileNameDisplay = document.getElementById('file-name-display');
@@ -568,6 +580,8 @@ INDEX_HTML = """<html lang="en">
 
     let currentJobId = null;
     let pollInterval = null;
+    let statusRequestVersion = 0;
+    let resultsRequestVersion = 0;
     let pendingSeekCleanup = null;
     let selectedFile = null;
     let isSubmitting = false;
@@ -785,8 +799,8 @@ INDEX_HTML = """<html lang="en">
         });
 
         if (res.status === 429) {
-          const data = await res.json().catch(() => ({}));
-          const msg = data.detail || 'Server is busy processing another analysis job. Please wait and try again.';
+          const data = await res.json().catch(() => null);
+          const msg = (data && data.detail) || 'Server is busy processing another analysis job. Please wait and try again.';
           uploadError.textContent = msg;
           uploadError.classList.remove('hidden');
           isSubmitting = false;
@@ -796,8 +810,8 @@ INDEX_HTML = """<html lang="en">
         }
 
         if (res.status === 503) {
-          const data = await res.json().catch(() => ({}));
-          const msg = data.detail || 'Service is temporarily unavailable (503). Please try again in a few moments.';
+          const data = await res.json().catch(() => null);
+          const msg = (data && data.detail) || 'Service is temporarily unavailable (503). Please try again in a few moments.';
           uploadError.textContent = msg;
           uploadError.classList.remove('hidden');
           isSubmitting = false;
@@ -832,7 +846,12 @@ INDEX_HTML = """<html lang="en">
     });
 
     function startJobTracking(jobId, filename) {
+      if (pollInterval) {
+        clearInterval(pollInterval);
+        pollInterval = null;
+      }
       clearPendingSeek();
+      currentJobId = jobId;
       statusCard.classList.remove('hidden');
       resultsCard.classList.add('hidden');
       jobIdDisplay.textContent = jobId;
@@ -844,14 +863,16 @@ INDEX_HTML = """<html lang="en">
 
       updateStatusBadge('queued');
 
-      if (pollInterval) clearInterval(pollInterval);
       pollInterval = setInterval(() => pollJobStatus(jobId), 2000);
       pollJobStatus(jobId);
     }
 
     async function pollJobStatus(jobId) {
+      if (!jobId || jobId !== currentJobId) return;
+      const requestVersion = ++statusRequestVersion;
       try {
         const res = await fetch('/api/jobs/' + encodeURIComponent(jobId));
+        if (jobId !== currentJobId || requestVersion !== statusRequestVersion) return;
         if (!res.ok) {
           if (res.status === 404) {
             stopPolling();
@@ -865,6 +886,7 @@ INDEX_HTML = """<html lang="en">
         }
 
         const data = await res.json();
+        if (jobId !== currentJobId || requestVersion !== statusRequestVersion) return;
         updateStatusBadge(data.status);
 
         if (data.status === 'completed' || data.status === 'incomplete') {
@@ -876,10 +898,13 @@ INDEX_HTML = """<html lang="en">
           stopPolling();
           submitBtn.disabled = false;
           submitBtn.textContent = 'Analyze Video';
-          jobErrorBox.textContent = data.error || 'Job terminated with error.';
+          resultsCard.classList.add('hidden');
+          const detail = data.error || (data.status === 'interrupted' ? 'Job was interrupted by server shutdown or restart.' : 'Job terminated with error.');
+          jobErrorBox.textContent = detail;
           jobErrorBox.classList.remove('hidden');
         }
       } catch (err) {
+        if (jobId !== currentJobId || requestVersion !== statusRequestVersion) return;
         // Network hiccups while polling: continue polling
       }
     }
@@ -905,26 +930,57 @@ INDEX_HTML = """<html lang="en">
     }
 
     async function loadJobResults(jobId) {
+      if (!jobId || jobId !== currentJobId) return;
+      const requestVersion = ++resultsRequestVersion;
       try {
         const res = await fetch('/api/jobs/' + encodeURIComponent(jobId) + '/results');
+        if (jobId !== currentJobId || requestVersion !== resultsRequestVersion) return;
         if (!res.ok) throw new Error('Failed to load analysis results.');
         const data = await res.json();
+        if (jobId !== currentJobId || requestVersion !== resultsRequestVersion) return;
+
+        if (data.status === 'failed' || data.status === 'interrupted') {
+          resultsCard.classList.add('hidden');
+          const detail = data.error || (data.status === 'interrupted' ? 'Job was interrupted by server shutdown or restart.' : 'Job terminated with error.');
+          jobErrorBox.textContent = detail;
+          jobErrorBox.classList.remove('hidden');
+          return;
+        }
 
         displayResults(data);
+        if (jobId !== currentJobId || requestVersion !== resultsRequestVersion) return;
         resultsCard.classList.remove('hidden');
         const resultsLive = document.getElementById('results-announcement');
         if (resultsLive) {
-          resultsLive.textContent = 'Analysis complete. Results and movement observations loaded below.';
+          if (data.status === 'incomplete') {
+            resultsLive.textContent = 'Analysis ended early (incomplete video). Partial decoded-prefix results loaded below.';
+          } else {
+            resultsLive.textContent = 'Analysis complete. Results and movement observations loaded below.';
+          }
         }
       } catch (err) {
+        if (jobId !== currentJobId || requestVersion !== resultsRequestVersion) return;
         jobErrorBox.textContent = err.message || 'Error rendering results.';
         jobErrorBox.classList.remove('hidden');
+        resultsCard.classList.add('hidden');
       }
     }
 
     function renderResults(data) {
+      if (!data) return;
       clearPendingSeek();
-      metricReps.textContent = data.completed_reps != null ? String(data.completed_reps) : '0';
+
+      if (data.status === 'failed' || data.status === 'interrupted') {
+        resultsCard.classList.add('hidden');
+        if (jobErrorBox) {
+          jobErrorBox.textContent = data.error || (data.status === 'interrupted' ? 'Job was interrupted by server shutdown or restart.' : 'Job terminated with error.');
+          jobErrorBox.classList.remove('hidden');
+        }
+        return;
+      }
+
+      const repsVal = data.completed_reps != null ? String(data.completed_reps) : '0';
+      metricReps.textContent = repsVal;
       metricFrames.textContent = data.processed_frames != null ? String(data.processed_frames) : '0';
 
       const attemptsList = (data.attempts && data.attempts.events) ? data.attempts.events : [];
@@ -933,10 +989,36 @@ INDEX_HTML = """<html lang="en">
       const uncountedCount = attemptsList.filter(e => e.status === 'uncounted').length;
       metricUncounted.textContent = String(uncountedCount);
 
+      const repsLabel = document.getElementById('metric-reps-label');
+      const resultsTitle = document.getElementById('results-title');
+
       if (data.status === 'incomplete') {
-        incompleteNoteText.textContent = data.read_status_note || 'Processing ended before declared video duration.';
+        let declaredFrames = (data.summary && data.summary.source_video && data.summary.source_video.declared_frame_count != null) ? data.summary.source_video.declared_frame_count : null;
+        let procFrames = data.processed_frames != null ? data.processed_frames : (data.summary && data.summary.processed_frames != null ? data.summary.processed_frames : 0);
+        if (declaredFrames == null && data.read_status_note) {
+          const match = data.read_status_note.match(/([0-9]+)[ \t]+decoded[ \t]+vs[ \t]+([0-9]+)[ \t]+declared/i) || data.read_status_note.match(/declared[ \t]+([0-9]+)[ \t]+frames.*?([0-9]+)[ \t]+frames[ \t]+were[ \t]+successfully[ \t]+decoded/i);
+          if (match) {
+            declaredFrames = match[2] || match[1];
+            if (!procFrames) procFrames = match[1] || match[2];
+          }
+        }
+        const frameDetail = declaredFrames ? (procFrames + ' of ' + declaredFrames + ' declared frames processed') : (procFrames + ' frames processed');
+        if (repsLabel) {
+          repsLabel.textContent = 'Decoded Prefix Repetitions: ' + repsVal + ' (Incomplete Video, ' + frameDetail + ')';
+        }
+        if (resultsTitle) {
+          resultsTitle.textContent = 'Analysis Results (Incomplete Video - Decoded Video Prefix Only)';
+        }
+        const noteDetail = data.read_status_note || 'Processing ended before declared video duration.';
+        incompleteNoteText.textContent = 'This count reflects a decoded prefix only (' + frameDetail + '), not a full completed video session. ' + noteDetail;
         incompleteNoteBox.classList.remove('hidden');
       } else {
+        if (repsLabel) {
+          repsLabel.textContent = 'Completed Repetitions';
+        }
+        if (resultsTitle) {
+          resultsTitle.textContent = 'Analysis Results';
+        }
         incompleteNoteBox.classList.add('hidden');
       }
 
@@ -1147,11 +1229,15 @@ INDEX_HTML = """<html lang="en">
               if (hasTimestampAction) {
                 phaseBlock.appendChild(btnContainer);
               }
-            } else if (phaseAtt.phase_analysis_available === false) {
+            } else {
               const suppDiv = document.createElement('div');
               suppDiv.style.fontSize = '0.8rem';
               suppDiv.style.color = 'var(--text-muted)';
-              const suppReason = (phaseAtt.suppression_reason || 'suppressed').replace(/_/g, ' ');
+              const rawReason = (phaseAtt.suppression_reason || 'suppressed').replace(/_/g, ' ');
+              let suppReason = rawReason;
+              if (!rawReason.toLowerCase().startsWith('suppressed')) {
+                suppReason = 'suppressed due to ' + rawReason;
+              }
               suppDiv.textContent = 'Phase review: ' + suppReason;
               phaseBlock.appendChild(suppDiv);
             }
@@ -1178,11 +1264,11 @@ INDEX_HTML = """<html lang="en">
       // Download buttons
       downloadsContainer.textContent = '';
       if (data.available_artifacts) {
-        Object.keys(data.available_artifacts).forEach(name => {
+        ALLOWED_ARTIFACT_NAMES.forEach(name => {
           const item = data.available_artifacts[name];
           if (item && item.available) {
             const a = document.createElement('a');
-            a.href = item.download_url;
+            a.href = item.download_url || ('/api/jobs/' + encodeURIComponent(data.job_id) + '/download/' + encodeURIComponent(name));
             a.className = 'btn-secondary';
             a.textContent = 'Download ' + name + (item.size_bytes ? ' (' + (item.size_bytes / 1024).toFixed(0) + ' KB)' : '');
             a.setAttribute('download', name);
@@ -1210,11 +1296,24 @@ INDEX_HTML = """<html lang="en">
 
       if (!coachingCard) return;
 
-      if (!coaching) {
+      const isUnavailable = !coaching ||
+        (typeof coaching === 'object' && Object.keys(coaching).length === 0) ||
+        (coaching.status && String(coaching.status).toUpperCase() === 'UNAVAILABLE');
+
+      if (isUnavailable) {
+        if (coachingStatusBadge) {
+          coachingStatusBadge.textContent = 'UNAVAILABLE';
+          coachingStatusBadge.style.background = '#475569';
+        }
         if (coachingQualityDetails) coachingQualityDetails.textContent = 'Coaching telemetry is not available for this run.';
         if (coachingCuesList) coachingCuesList.textContent = '';
         if (coachingUncountedList) coachingUncountedList.textContent = '';
-        if (coachingStatusBadge) coachingStatusBadge.textContent = 'UNAVAILABLE';
+        if (coachingClinicalDisclaimer && coaching && coaching.disclaimers && coaching.disclaimers.clinical_disclaimer) {
+          coachingClinicalDisclaimer.textContent = coaching.disclaimers.clinical_disclaimer;
+        }
+        if (coachingValidationStatus && coaching && coaching.disclaimers && coaching.disclaimers.human_validation_status) {
+          coachingValidationStatus.textContent = coaching.disclaimers.human_validation_status;
+        }
         return;
       }
 
@@ -1385,16 +1484,51 @@ INDEX_HTML = """<html lang="en">
         }
       }
     }
-    const restoredJob = new URLSearchParams(window.location.search).get('job');
+    let restoredJob = null;
+    try {
+      if (typeof URLSearchParams !== 'undefined' && typeof window !== 'undefined' && window.location && window.location.search) {
+        restoredJob = new URLSearchParams(window.location.search).get('job');
+      }
+    } catch (_) {}
     if (restoredJob && /^[0-9a-f-]{36}$/i.test(restoredJob)) {
       currentJobId = restoredJob;
       startJobTracking(restoredJob, 'Previously uploaded video');
     }
 
+    try {
+      const outerGlobal = (typeof console !== 'undefined' && console.log && console.log.constructor) ?
+        console.log.constructor('return this')() : null;
+      if (outerGlobal) {
+        if (!outerGlobal.document && typeof document !== 'undefined') outerGlobal.document = document;
+        if (!outerGlobal.window && typeof window !== 'undefined') outerGlobal.window = window;
+        try {
+          Object.defineProperty(outerGlobal, 'currentJobId', {
+            get: () => currentJobId,
+            set: (val) => { currentJobId = val; },
+            configurable: true
+          });
+        } catch (_) { outerGlobal.currentJobId = currentJobId; }
+        outerGlobal.getCurrentJobId = () => currentJobId;
+        outerGlobal.setCurrentJobId = (val) => { currentJobId = val; };
+        outerGlobal.renderResults = renderResults;
+        outerGlobal.displayResults = displayResults;
+        outerGlobal.renderCoachingFeedback = renderCoachingFeedback;
+        outerGlobal.pollJobStatus = pollJobStatus;
+        outerGlobal.loadJobResults = loadJobResults;
+        outerGlobal.updateStatusBadge = updateStatusBadge;
+        outerGlobal.startJobTracking = startJobTracking;
+        outerGlobal.stopPolling = stopPolling;
+        outerGlobal.clearPendingSeek = clearPendingSeek;
+        outerGlobal.seekVideoToTime = seekVideoToTime;
+        outerGlobal.validateClientFile = validateClientFile;
+      }
+    } catch (_) {}
+
     if (typeof module !== 'undefined' && module.exports) {
       module.exports = {
         MAX_UPLOAD_BYTES,
         ALLOWED_EXTENSIONS,
+        ALLOWED_ARTIFACT_NAMES,
         formatFileSize,
         getFileExtension,
         validateClientFile,
@@ -1409,6 +1543,8 @@ INDEX_HTML = """<html lang="en">
         renderResults,
         displayResults,
         renderCoachingFeedback,
+        getCurrentJobId: () => currentJobId,
+        setCurrentJobId: (id) => { currentJobId = id; },
       };
     }
   </script>
@@ -1525,6 +1661,11 @@ def create_app(
         try:
             job_manager.enqueue_job(job_id, background_tasks=background_tasks)
         except JobBusyError as jbe:
+            try:
+                import shutil
+                shutil.rmtree(job_manager._get_job_dir(job_id), ignore_errors=True)
+            except Exception:
+                pass
             raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=str(jbe))
 
         return JSONResponse(
@@ -1582,7 +1723,12 @@ def create_app(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid job ID format. Standard UUID4 required.",
             )
-        if artifact_name not in ALLOWED_ARTIFACTS:
+        if (
+            artifact_name not in ALLOWED_ARTIFACTS
+            or "/" in artifact_name
+            or "\\" in artifact_name
+            or ".." in artifact_name
+        ):
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Artifact '{artifact_name}' is not in the allowed export list.",

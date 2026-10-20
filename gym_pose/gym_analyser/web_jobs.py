@@ -426,7 +426,12 @@ class JobManager:
         if not is_valid_job_id(job_id):
             raise ValueError(f"Invalid job ID: '{job_id}'")
 
-        if artifact_name not in ALLOWED_ARTIFACTS:
+        if (
+            artifact_name not in ALLOWED_ARTIFACTS
+            or "/" in artifact_name
+            or "\\" in artifact_name
+            or ".." in artifact_name
+        ):
             raise FileNotFoundError(f"Requested artifact '{artifact_name}' is not in the allowed export list.")
 
         job_dir = self._get_job_dir(job_id)
