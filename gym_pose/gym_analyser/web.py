@@ -45,8 +45,7 @@ from .web_jobs import (
     is_valid_job_id,
 )
 
-INDEX_HTML = """<!DOCTYPE html>
-<html lang="en">
+INDEX_HTML = """<html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -60,30 +59,59 @@ INDEX_HTML = """<!DOCTYPE html>
       --text-muted: #94a3b8;
       --primary: #38bdf8;
       --primary-hover: #0ea5e9;
+      --primary-focus: rgba(56, 189, 248, 0.4);
       --success: #22c55e;
       --warning: #f59e0b;
       --danger: #ef4444;
       --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      --touch-min: 44px;
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
+    *:focus-visible {
+      outline: 3px solid var(--primary);
+      outline-offset: 2px;
+    }
     body {
       background: var(--bg);
       color: var(--text);
       font-family: var(--font);
       line-height: 1.5;
-      padding: 24px 16px;
+      padding: clamp(12px, 2.5vw, 24px) clamp(8px, 2vw, 16px);
+      min-height: 100vh;
     }
-    .container { max-width: 980px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
+    .container {
+      max-width: 980px;
+      width: 100%;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
     header { text-align: center; margin-bottom: 8px; }
-    header h1 { font-size: 1.85rem; font-weight: 700; color: var(--primary); }
-    header p { color: var(--text-muted); font-size: 0.95rem; margin-top: 4px; }
+    header h1 {
+      font-size: clamp(1.4rem, 4vw, 1.85rem);
+      font-weight: 700;
+      color: var(--primary);
+      line-height: 1.25;
+    }
+    header p {
+      color: var(--text-muted);
+      font-size: clamp(0.85rem, 2vw, 0.95rem);
+      margin-top: 6px;
+    }
     .card {
       background: var(--card-bg);
       border: 1px solid var(--card-border);
       border-radius: 8px;
-      padding: 20px;
+      padding: clamp(14px, 3vw, 20px);
+      overflow: hidden;
     }
-    .card h2 { font-size: 1.15rem; font-weight: 600; margin-bottom: 12px; color: var(--text); }
+    .card h2 {
+      font-size: clamp(1.05rem, 2.5vw, 1.15rem);
+      font-weight: 600;
+      margin-bottom: 12px;
+      color: var(--text);
+    }
     .notice-box {
       background: #0f172a;
       border-left: 4px solid var(--primary);
@@ -93,49 +121,156 @@ INDEX_HTML = """<!DOCTYPE html>
       color: var(--text-muted);
       display: flex;
       flex-direction: column;
-      gap: 6px;
+      gap: 8px;
+      line-height: 1.45;
     }
     .notice-box strong { color: var(--text); }
     .upload-form { display: flex; flex-direction: column; gap: 14px; }
     .file-input-wrapper {
       border: 2px dashed var(--card-border);
-      border-radius: 6px;
-      padding: 24px;
+      border-radius: 8px;
+      padding: clamp(16px, 4vw, 28px);
       text-align: center;
       cursor: pointer;
-      transition: border-color 0.2s;
+      min-height: 110px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      transition: border-color 0.2s, background-color 0.2s, transform 0.15s;
     }
-    .file-input-wrapper:hover { border-color: var(--primary); }
-    input[type="file"] { display: none; }
-    .file-label { cursor: pointer; color: var(--primary); font-weight: 500; font-size: 0.95rem; }
-    .selected-filename { margin-top: 8px; font-size: 0.85rem; color: var(--text-muted); }
+    .file-input-wrapper:hover {
+      border-color: var(--primary);
+      background-color: rgba(56, 189, 248, 0.04);
+    }
+    .file-input-wrapper.drag-over {
+      border-color: var(--primary);
+      background-color: rgba(56, 189, 248, 0.12);
+      transform: scale(1.01);
+    }
+    .file-input-wrapper:focus-visible {
+      border-color: var(--primary);
+      outline: 3px solid var(--primary);
+      outline-offset: 2px;
+      background-color: rgba(56, 189, 248, 0.08);
+    }
+    .sr-only-input {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+    .file-label {
+      cursor: pointer;
+      color: var(--primary);
+      font-weight: 600;
+      font-size: 1rem;
+      min-height: var(--touch-min);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 4px 12px;
+    }
+    .file-label:hover { text-decoration: underline; }
+    .selected-filename {
+      font-size: 0.88rem;
+      color: var(--text-muted);
+      word-break: break-all;
+    }
     .btn {
       background: var(--primary);
       color: #0f172a;
       border: none;
-      padding: 10px 18px;
+      min-height: var(--touch-min);
+      min-width: var(--touch-min);
+      padding: 10px 22px;
       border-radius: 6px;
       font-weight: 600;
       font-size: 0.95rem;
       cursor: pointer;
-      transition: background 0.2s, opacity 0.2s;
+      transition: background 0.2s, opacity 0.2s, transform 0.1s;
       align-self: flex-start;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
     }
     .btn:hover:not(:disabled) { background: var(--primary-hover); }
+    .btn:active:not(:disabled) { transform: translateY(1px); }
     .btn:disabled { opacity: 0.5; cursor: not-allowed; }
     .btn-secondary {
       background: #334155;
       color: var(--text);
       text-decoration: none;
-      font-size: 0.82rem;
-      padding: 6px 12px;
-      border-radius: 4px;
-      display: inline-block;
+      font-size: 0.85rem;
+      font-weight: 500;
+      min-height: var(--touch-min);
+      padding: 10px 16px;
+      border-radius: 6px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      transition: background 0.2s, color 0.2s;
     }
     .btn-secondary:hover { background: #475569; }
+    .btn-seek {
+      background: #1e293b;
+      border: 1px solid var(--primary);
+      color: var(--primary);
+      min-height: var(--touch-min);
+      padding: 8px 14px;
+      border-radius: 6px;
+      font-size: 0.82rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 0.2s, color 0.2s;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      line-height: 1.2;
+    }
+    .btn-seek:hover {
+      background: var(--primary);
+      color: #0f172a;
+    }
+    .review-nav-link {
+      color: var(--primary);
+      font-size: 0.9rem;
+      text-decoration: none;
+      border: 1px solid var(--card-border);
+      padding: 8px 16px;
+      border-radius: 6px;
+      background: var(--card-bg);
+      min-height: var(--touch-min);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      transition: background 0.2s, border-color 0.2s;
+    }
+    .review-nav-link:hover {
+      background: #334155;
+      border-color: var(--primary);
+    }
     .status-badge {
       display: inline-block;
-      padding: 4px 10px;
+      padding: 6px 12px;
       border-radius: 4px;
       font-size: 0.82rem;
       font-weight: 600;
@@ -149,7 +284,7 @@ INDEX_HTML = """<!DOCTYPE html>
     .status-failed, .status-interrupted { background: #dc2626; color: #fff; }
     @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.6; } 100% { opacity: 1; } }
     .hidden { display: none !important; }
-    .status-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+    .status-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; flex-wrap: wrap; gap: 8px; }
     .metrics-grid {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -160,21 +295,30 @@ INDEX_HTML = """<!DOCTYPE html>
       background: #0f172a;
       border: 1px solid var(--card-border);
       border-radius: 6px;
-      padding: 12px 16px;
+      padding: 14px 16px;
       text-align: center;
     }
     .metric-value { font-size: 1.75rem; font-weight: 700; color: var(--primary); }
     .metric-label { font-size: 0.8rem; color: var(--text-muted); text-transform: uppercase; margin-top: 4px; }
+    .table-responsive {
+      width: 100%;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      margin-top: 12px;
+      border: 1px solid var(--card-border);
+      border-radius: 6px;
+    }
     .data-table {
       width: 100%;
       border-collapse: collapse;
       font-size: 0.88rem;
-      margin-top: 12px;
+      min-width: 600px;
     }
     .data-table th, .data-table td {
       border: 1px solid var(--card-border);
-      padding: 8px 12px;
+      padding: 10px 12px;
       text-align: left;
+      vertical-align: top;
     }
     .data-table th { background: #0f172a; color: var(--text-muted); font-weight: 600; }
     .data-table tr:nth-child(even) { background: #172033; }
@@ -188,10 +332,10 @@ INDEX_HTML = """<!DOCTYPE html>
       background: #0f172a;
       border: 1px solid var(--card-border);
       border-radius: 6px;
-      padding: 12px;
+      padding: 14px;
       display: flex;
       flex-direction: column;
-      gap: 8px;
+      gap: 10px;
     }
     .media-box img, .media-box video {
       width: 100%;
@@ -201,6 +345,7 @@ INDEX_HTML = """<!DOCTYPE html>
       background: #000;
     }
     .media-caption { font-size: 0.82rem; color: var(--text-muted); }
+    .downloads-wrapper { width: 100%; }
     .downloads-grid {
       display: flex;
       flex-wrap: wrap;
@@ -212,31 +357,21 @@ INDEX_HTML = """<!DOCTYPE html>
       border-radius: 6px;
       font-size: 0.88rem;
       margin-top: 12px;
+      line-height: 1.45;
     }
     .alert-danger { background: #450a0a; border: 1px solid #7f1d1d; color: #fca5a5; }
     .alert-warning { background: #451a03; border: 1px solid #78350f; color: #fde68a; }
-    .btn-seek {
-      background: #1e293b;
-      border: 1px solid var(--primary);
-      color: var(--primary);
-      padding: 3px 8px;
-      border-radius: 4px;
-      font-size: 0.78rem;
-      cursor: pointer;
-      transition: background 0.2s, color 0.2s;
-      display: inline-flex;
-      align-items: center;
-      line-height: 1.2;
-    }
-    .btn-seek:hover {
-      background: var(--primary);
-      color: #0f172a;
+    @media (max-width: 640px) {
+      .btn { width: 100%; align-self: stretch; }
+      .btn-secondary { width: 100%; text-align: center; }
+      .status-header { flex-direction: column; align-items: flex-start; }
+      .metrics-grid { grid-template-columns: 1fr 1fr; }
     }
   </style>
 </head>
 <body>
   <div class="container">
-    <nav class="review-nav" style="display: flex; justify-content: flex-end; margin-bottom: 8px;"><a href="/review/" class="review-nav-link" style="color: var(--primary); font-size: 0.9rem; text-decoration: none; border: 1px solid var(--card-border); padding: 6px 14px; border-radius: 6px; background: var(--card-bg);">&rarr; Human Review Workspace (Label raw video BEFORE viewing model output)</a></nav>
+    <nav class="review-nav" style="display: flex; justify-content: flex-end; margin-bottom: 8px;"><a href="/review/" class="review-nav-link" id="review-link">&rarr; Human Review Workspace (Label raw video BEFORE viewing model output)</a></nav>
     <header>
       <h1>2D Gym Pose Analyser</h1>
       <p>Single-user local squat repetition counter and 2D kinematic feedback</p>
@@ -257,31 +392,32 @@ INDEX_HTML = """<!DOCTYPE html>
     <div class="card" id="upload-card">
       <h2>Upload Squat Video</h2>
       <form class="upload-form" id="upload-form">
-        <div class="file-input-wrapper" id="drop-zone" onclick="document.getElementById('video-input').click()">
-          <input type="file" id="video-input" name="file" accept="video/*,.mp4,.mov,.avi,.mkv,.webm,.m4v">
-          <div class="file-label">Click to select video file (or drag & drop here)</div>
-          <div class="selected-filename" id="file-name-display">No file selected (Max 200MB: MP4, MOV, AVI, MKV, WebM)</div>
+        <div class="file-input-wrapper" id="drop-zone" tabindex="0" role="button" aria-controls="video-input" aria-label="Upload squat video file (click, press Enter or Space, or drag and drop here)">
+          <input type="file" id="video-input" name="file" accept="video/*,.mp4,.mov,.avi,.mkv,.webm,.m4v" class="sr-only-input" tabindex="-1">
+          <label for="video-input" class="file-label" id="file-label">Click to select video file (or drag & drop here)</label>
+          <div class="selected-filename" id="file-name-display" aria-live="polite">No file selected (Max 200MB: MP4, MOV, AVI, MKV, WebM, M4V)</div>
         </div>
         <button type="submit" class="btn" id="submit-btn" disabled>Analyze Video</button>
       </form>
-      <div id="upload-error" class="alert-box alert-danger hidden"></div>
+      <div id="upload-error" class="alert-box alert-danger hidden" role="alert" aria-live="assertive"></div>
     </div>
 
     <!-- Active Job Status Panel -->
-    <div class="card hidden" id="status-card">
+    <div class="card hidden" id="status-card" role="region" aria-label="Analysis Job Status">
       <div class="status-header">
         <h2>Analysis Job Status</h2>
-        <span class="status-badge" id="status-badge">QUEUED</span>
+        <span class="status-badge" id="status-badge" role="status" aria-live="polite"><span id="job-status">QUEUED</span></span>
       </div>
       <div><strong>Job ID:</strong> <span id="job-id-display"></span></div>
       <div><strong>File:</strong> <span id="job-filename-display"></span></div>
-      <div id="job-error-box" class="alert-box alert-danger hidden"></div>
-      <div id="job-warning-box" class="alert-box alert-warning hidden"></div>
+      <div id="job-error-box" class="alert-box alert-danger hidden" role="alert" aria-live="assertive"></div>
+      <div id="job-warning-box" class="alert-box alert-warning hidden" role="alert" aria-live="polite"></div>
     </div>
 
     <!-- Analysis Results Section -->
-    <div class="card hidden" id="results-card">
+    <div class="card hidden" id="results-card" role="region" aria-label="Analysis Results">
       <h2>Analysis Results</h2>
+      <div id="results-announcement" class="sr-only" role="status" aria-live="polite"></div>
 
       <div class="metrics-grid">
         <div class="metric-card">
@@ -303,7 +439,7 @@ INDEX_HTML = """<!DOCTYPE html>
       </div>
 
       <!-- Incomplete Warning if Applicable -->
-      <div id="incomplete-note-box" class="alert-box alert-warning hidden">
+      <div id="incomplete-note-box" class="alert-box alert-warning hidden" role="alert" aria-live="polite">
         <strong>Incomplete Processing Warning:</strong> <span id="incomplete-note-text"></span>
       </div>
 
@@ -313,25 +449,57 @@ INDEX_HTML = """<!DOCTYPE html>
         <div id="session-observations"></div>
       </div>
 
+      <!-- Coaching Feedback Card -->
+      <div id="coaching-feedback-card" style="margin-top: 18px; border: 1px solid var(--card-border); border-radius: 6px; padding: 14px; background: #0f172a;">
+        <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-bottom: 10px;">
+          <h3 style="margin: 0;">Actionable Coaching Feedback &amp; Telemetry</h3>
+          <span id="coaching-status-badge" class="status-badge" style="background: #334155; color: #f8fafc; font-size: 0.75rem;">UNVALIDATED</span>
+        </div>
+
+        <div class="notice-box" style="margin-bottom: 12px; font-size: 0.82rem;">
+          <div><strong>Clinical Disclaimer:</strong> <span id="coaching-clinical-disclaimer">These 2D kinematic measurements are descriptive planar observations, not clinical diagnostic assessments or technique grades.</span></div>
+          <div><strong>Validation Status:</strong> <span id="coaching-validation-status">UNVALIDATED by human expert review on diverse unseen subjects.</span></div>
+        </div>
+
+        <div id="coaching-feedback-content">
+          <div id="coaching-quality-box" style="margin-bottom: 12px; font-size: 0.85rem;">
+            <strong>Recording Quality Assessment:</strong>
+            <div id="coaching-quality-details" style="color: var(--text-muted); margin-top: 4px;"></div>
+          </div>
+
+          <div id="coaching-cues-box" style="margin-bottom: 12px;">
+            <strong style="font-size: 0.88rem;">Per-Repetition Pacing &amp; Depth Cues:</strong>
+            <div id="coaching-cues-list" style="margin-top: 6px; display: flex; flex-direction: column; gap: 8px;"></div>
+          </div>
+
+          <div id="coaching-uncounted-box" style="margin-bottom: 6px;">
+            <strong style="font-size: 0.88rem;">Uncounted Movement Context &amp; Hypotheses:</strong>
+            <div id="coaching-uncounted-list" style="margin-top: 6px; display: flex; flex-direction: column; gap: 6px;"></div>
+          </div>
+        </div>
+      </div>
+
       <!-- Attempt Observations Table -->
       <div style="margin-top: 16px;">
         <h3>Observed Movement Events</h3>
         <p style="font-size: 0.82rem; color: var(--text-muted); margin-top: 4px;">
           Includes counted repetitions and uncounted events (e.g. setup, depth threshold not reached, tracking interruption).
         </p>
-        <table class="data-table" id="attempts-table">
-          <thead>
-            <tr>
-              <th>#</th>
-              <th>Status</th>
-              <th>Reason</th>
-              <th>Frames (Time)</th>
-              <th>Min Knee Angle</th>
-              <th>Explanation & Posture Telemetry</th>
-            </tr>
-          </thead>
-          <tbody id="attempts-tbody"></tbody>
-        </table>
+        <div class="table-responsive" tabindex="0" role="region" aria-label="Observed Movement Events table">
+          <table class="data-table" id="attempts-table">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Status</th>
+                <th>Reason</th>
+                <th>Frames (Time)</th>
+                <th>Min Knee Angle</th>
+                <th>Explanation & Posture Telemetry</th>
+              </tr>
+            </thead>
+            <tbody id="attempts-tbody"></tbody>
+          </table>
+        </div>
       </div>
 
       <!-- Visual Media: Angle Plot and Annotated Video -->
@@ -344,12 +512,14 @@ INDEX_HTML = """<!DOCTYPE html>
 
         <div class="media-box" id="video-box">
           <h3>Annotated Video Output</h3>
-          <video id="annotated-video" controls preload="metadata">
-            <source id="video-source" src="" type="video/mp4">
-            Your browser does not support HTML5 video playback.
-          </video>
+          <div class="video-player-container" id="preview-player">
+            <video id="annotated-video" controls preload="metadata" aria-label="Squat analysis preview video">
+              <source id="video-source" src="" type="video/mp4">
+              Your browser does not support HTML5 video playback.
+            </video>
+          </div>
           <div id="video-fallback-notice" class="notice-box" style="margin-top: 8px;">
-            <strong>Browser Playback Notice:</strong> Video is rendered in OpenCV standard 'mp4v' format. Some web browsers require H.264 video streams and may display a blank player. Use the button below to download the annotated video file for local playback in VLC or QuickTime.
+            <strong>Browser Playback Notice:</strong> Video preview is rendered in OpenCV mp4v format. Some web browsers require H.264 streams and may display a blank player. If playback does not start, use the download links below to view the video in VLC or your local media player.
           </div>
         </div>
       </div>
@@ -358,14 +528,20 @@ INDEX_HTML = """<!DOCTYPE html>
       <div style="margin-top: 20px;">
         <h3>Exported Artifacts</h3>
         <p style="font-size: 0.82rem; color: var(--text-muted); margin-top: 4px;">Download raw telemetry and verified analysis outputs:</p>
-        <div class="downloads-grid" id="downloads-container"></div>
+        <div class="downloads-wrapper" id="download-links">
+          <div class="downloads-grid" id="downloads-container"></div>
+        </div>
       </div>
     </div>
   </div>
 
   <script>
+    const MAX_UPLOAD_BYTES = 200 * 1024 * 1024;
+    const ALLOWED_EXTENSIONS = ['.mp4', '.mov', '.avi', '.mkv', '.webm', '.m4v'];
+
     const fileInput = document.getElementById('video-input');
     const fileNameDisplay = document.getElementById('file-name-display');
+    const dropZone = document.getElementById('drop-zone');
     const submitBtn = document.getElementById('submit-btn');
     const uploadForm = document.getElementById('upload-form');
     const uploadError = document.getElementById('upload-error');
@@ -393,6 +569,72 @@ INDEX_HTML = """<!DOCTYPE html>
     let currentJobId = null;
     let pollInterval = null;
     let pendingSeekCleanup = null;
+    let selectedFile = null;
+    let isSubmitting = false;
+
+    function formatFileSize(bytes) {
+      if (typeof bytes !== 'number' || !Number.isFinite(bytes) || bytes < 0) return '0 B';
+      if (bytes < 1024) return bytes + ' B';
+      if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+      return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
+    }
+
+    function getFileExtension(filename) {
+      if (!filename || typeof filename !== 'string') return '';
+      const dotIdx = filename.lastIndexOf('.');
+      if (dotIdx === -1) return '';
+      return filename.slice(dotIdx).toLowerCase();
+    }
+
+    function validateClientFile(file) {
+      if (!file) {
+        return { valid: false, error: 'No file selected.' };
+      }
+      if (file.size === 0) {
+        return { valid: false, error: 'Uploaded file is empty (0 bytes).' };
+      }
+      if (file.size > MAX_UPLOAD_BYTES) {
+        return {
+          valid: false,
+          error: 'File size (' + formatFileSize(file.size) + ') exceeds maximum upload limit of 200 MB.'
+        };
+      }
+      const ext = getFileExtension(file.name);
+      if (!ALLOWED_EXTENSIONS.includes(ext)) {
+        return {
+          valid: false,
+          error: 'Unsupported video format "' + (ext || 'none') + '". Allowed formats: ' + ALLOWED_EXTENSIONS.join(', ')
+        };
+      }
+      return { valid: true, error: null };
+    }
+
+    function handleFileSelection(file) {
+      if (!file) {
+        selectedFile = null;
+        fileNameDisplay.textContent = 'No file selected (Max 200MB: MP4, MOV, AVI, MKV, WebM, M4V)';
+        submitBtn.disabled = true;
+        uploadError.classList.add('hidden');
+        uploadError.textContent = '';
+        return;
+      }
+
+      const validation = validateClientFile(file);
+      if (!validation.valid) {
+        selectedFile = null;
+        uploadError.textContent = validation.error;
+        uploadError.classList.remove('hidden');
+        fileNameDisplay.textContent = 'Invalid file: ' + file.name + ' (' + formatFileSize(file.size) + ')';
+        submitBtn.disabled = true;
+        return;
+      }
+
+      selectedFile = file;
+      uploadError.classList.add('hidden');
+      uploadError.textContent = '';
+      fileNameDisplay.textContent = file.name + ' (' + formatFileSize(file.size) + ')';
+      submitBtn.disabled = false;
+    }
 
     function clearPendingSeek() {
       if (pendingSeekCleanup) {
@@ -455,26 +697,86 @@ INDEX_HTML = """<!DOCTYPE html>
 
     window.addEventListener('beforeunload', clearPendingSeek);
 
+    // Keyboard and click activation for dropZone
+    dropZone.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        fileInput.click();
+      }
+    });
+
+    dropZone.addEventListener('click', (e) => {
+      if (e.target === fileInput || e.target.closest('label[for="video-input"]')) {
+        return; // Let native label-for association activate the input without duplicate click
+      }
+      fileInput.click();
+    });
+
+    // Drag and drop cues and file handling
+    ['dragenter', 'dragover'].forEach(eventName => {
+      dropZone.addEventListener(eventName, (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        dropZone.classList.add('drag-over');
+      });
+    });
+
+    ['dragleave', 'dragend'].forEach(eventName => {
+      dropZone.addEventListener(eventName, (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        dropZone.classList.remove('drag-over');
+      });
+    });
+
+    dropZone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      dropZone.classList.remove('drag-over');
+      const files = e.dataTransfer ? e.dataTransfer.files : null;
+      if (files && files.length > 0) {
+        try {
+          fileInput.files = files;
+        } catch (_) {}
+        handleFileSelection(files[0]);
+      }
+    });
+
     fileInput.addEventListener('change', () => {
       if (fileInput.files && fileInput.files.length > 0) {
-        fileNameDisplay.textContent = fileInput.files[0].name + ' (' + (fileInput.files[0].size / (1024 * 1024)).toFixed(2) + ' MB)';
-        submitBtn.disabled = false;
-      } else {
-        fileNameDisplay.textContent = 'No file selected (Max 200MB)';
-        submitBtn.disabled = true;
+        handleFileSelection(fileInput.files[0]);
+      } else if (!selectedFile) {
+        handleFileSelection(null);
       }
     });
 
     uploadForm.addEventListener('submit', async (e) => {
       e.preventDefault();
-      if (!fileInput.files || fileInput.files.length === 0) return;
+      if (isSubmitting) return;
 
+      const fileToUpload = selectedFile || (fileInput.files && fileInput.files[0]);
+      if (!fileToUpload) {
+        uploadError.textContent = 'Please select a video file first.';
+        uploadError.classList.remove('hidden');
+        return;
+      }
+
+      const validation = validateClientFile(fileToUpload);
+      if (!validation.valid) {
+        uploadError.textContent = validation.error;
+        uploadError.classList.remove('hidden');
+        submitBtn.disabled = true;
+        return;
+      }
+
+      isSubmitting = true;
       submitBtn.disabled = true;
+      submitBtn.textContent = 'Uploading & Enqueueing...';
       uploadError.classList.add('hidden');
       uploadError.textContent = '';
 
       const formData = new FormData();
-      formData.append('file', fileInput.files[0]);
+      formData.append('file', fileToUpload);
 
       try {
         const res = await fetch('/api/jobs', {
@@ -483,26 +785,49 @@ INDEX_HTML = """<!DOCTYPE html>
         });
 
         if (res.status === 429) {
-          const data = await res.json();
-          uploadError.textContent = data.detail || 'Server is busy processing another analysis job. Please wait.';
+          const data = await res.json().catch(() => ({}));
+          const msg = data.detail || 'Server is busy processing another analysis job. Please wait and try again.';
+          uploadError.textContent = msg;
           uploadError.classList.remove('hidden');
+          isSubmitting = false;
           submitBtn.disabled = false;
+          submitBtn.textContent = 'Analyze Video';
+          return;
+        }
+
+        if (res.status === 503) {
+          const data = await res.json().catch(() => ({}));
+          const msg = data.detail || 'Service is temporarily unavailable (503). Please try again in a few moments.';
+          uploadError.textContent = msg;
+          uploadError.classList.remove('hidden');
+          isSubmitting = false;
+          submitBtn.disabled = false;
+          submitBtn.textContent = 'Analyze Video';
           return;
         }
 
         if (!res.ok) {
           const errData = await res.json().catch(() => ({ detail: 'Upload failed' }));
-          throw new Error(errData.detail || 'Upload failed with status ' + res.status);
+          const msg = errData.detail || 'Upload failed with status ' + res.status;
+          uploadError.textContent = msg;
+          uploadError.classList.remove('hidden');
+          isSubmitting = false;
+          submitBtn.disabled = false;
+          submitBtn.textContent = 'Analyze Video';
+          return;
         }
 
         const data = await res.json();
         currentJobId = data.job_id;
         history.replaceState(null, "", "?job=" + encodeURIComponent(currentJobId));
-        startJobTracking(currentJobId, data.filename);
+        startJobTracking(currentJobId, data.filename || fileToUpload.name);
+        isSubmitting = false;
       } catch (err) {
-        uploadError.textContent = err.message || 'Network error during upload.';
+        uploadError.textContent = err.message || 'Network error during video upload. Please check your connection and retry.';
         uploadError.classList.remove('hidden');
+        isSubmitting = false;
         submitBtn.disabled = false;
+        submitBtn.textContent = 'Analyze Video';
       }
     });
 
@@ -513,7 +838,9 @@ INDEX_HTML = """<!DOCTYPE html>
       jobIdDisplay.textContent = jobId;
       jobFilenameDisplay.textContent = filename || 'Video';
       jobErrorBox.classList.add('hidden');
+      jobErrorBox.textContent = '';
       jobWarningBox.classList.add('hidden');
+      jobWarningBox.textContent = '';
 
       updateStatusBadge('queued');
 
@@ -532,6 +859,7 @@ INDEX_HTML = """<!DOCTYPE html>
             jobErrorBox.textContent = 'Job not found on server.';
             jobErrorBox.classList.remove('hidden');
             submitBtn.disabled = false;
+            submitBtn.textContent = 'Analyze Video';
           }
           return;
         }
@@ -542,10 +870,12 @@ INDEX_HTML = """<!DOCTYPE html>
         if (data.status === 'completed' || data.status === 'incomplete') {
           stopPolling();
           submitBtn.disabled = false;
+          submitBtn.textContent = 'Analyze Video';
           loadJobResults(jobId);
         } else if (data.status === 'failed' || data.status === 'interrupted') {
           stopPolling();
           submitBtn.disabled = false;
+          submitBtn.textContent = 'Analyze Video';
           jobErrorBox.textContent = data.error || 'Job terminated with error.';
           jobErrorBox.classList.remove('hidden');
         }
@@ -562,8 +892,16 @@ INDEX_HTML = """<!DOCTYPE html>
     }
 
     function updateStatusBadge(status) {
-      statusBadge.textContent = (status || 'unknown').toUpperCase();
-      statusBadge.className = 'status-badge status-' + (status || 'queued');
+      const norm = (status || 'unknown').toLowerCase();
+      const label = norm.toUpperCase();
+      statusBadge.className = 'status-badge status-' + norm;
+      statusBadge.setAttribute('aria-label', 'Job status: ' + label);
+      const statusEl = document.getElementById('job-status');
+      if (statusEl) {
+        statusEl.textContent = label;
+      } else {
+        statusBadge.textContent = label;
+      }
     }
 
     async function loadJobResults(jobId) {
@@ -572,8 +910,12 @@ INDEX_HTML = """<!DOCTYPE html>
         if (!res.ok) throw new Error('Failed to load analysis results.');
         const data = await res.json();
 
-        renderResults(data);
+        displayResults(data);
         resultsCard.classList.remove('hidden');
+        const resultsLive = document.getElementById('results-announcement');
+        if (resultsLive) {
+          resultsLive.textContent = 'Analysis complete. Results and movement observations loaded below.';
+        }
       } catch (err) {
         jobErrorBox.textContent = err.message || 'Error rendering results.';
         jobErrorBox.classList.remove('hidden');
@@ -844,15 +1186,230 @@ INDEX_HTML = """<!DOCTYPE html>
             a.className = 'btn-secondary';
             a.textContent = 'Download ' + name + (item.size_bytes ? ' (' + (item.size_bytes / 1024).toFixed(0) + ' KB)' : '');
             a.setAttribute('download', name);
+            a.setAttribute('role', 'button');
             downloadsContainer.appendChild(a);
           }
         });
+      }
+
+      renderCoachingFeedback(data.coaching_feedback);
+    }
+
+    function displayResults(data) {
+      renderResults(data);
+    }
+
+    function renderCoachingFeedback(coaching) {
+      const coachingCard = document.getElementById('coaching-feedback-card');
+      const coachingStatusBadge = document.getElementById('coaching-status-badge');
+      const coachingClinicalDisclaimer = document.getElementById('coaching-clinical-disclaimer');
+      const coachingValidationStatus = document.getElementById('coaching-validation-status');
+      const coachingQualityDetails = document.getElementById('coaching-quality-details');
+      const coachingCuesList = document.getElementById('coaching-cues-list');
+      const coachingUncountedList = document.getElementById('coaching-uncounted-list');
+
+      if (!coachingCard) return;
+
+      if (!coaching) {
+        if (coachingQualityDetails) coachingQualityDetails.textContent = 'Coaching telemetry is not available for this run.';
+        if (coachingCuesList) coachingCuesList.textContent = '';
+        if (coachingUncountedList) coachingUncountedList.textContent = '';
+        if (coachingStatusBadge) coachingStatusBadge.textContent = 'UNAVAILABLE';
+        return;
+      }
+
+      if (coachingStatusBadge) {
+        const rawStatus = (coaching.status || 'UNVALIDATED').toUpperCase();
+        coachingStatusBadge.textContent = rawStatus;
+      }
+      if (coachingClinicalDisclaimer && coaching.disclaimers && coaching.disclaimers.clinical_disclaimer) {
+        coachingClinicalDisclaimer.textContent = coaching.disclaimers.clinical_disclaimer;
+      }
+      if (coachingValidationStatus && coaching.disclaimers && coaching.disclaimers.human_validation_status) {
+        coachingValidationStatus.textContent = coaching.disclaimers.human_validation_status;
+      }
+
+      if (coachingQualityDetails) {
+        coachingQualityDetails.textContent = '';
+        const recQuality = (coaching.overall_summary && coaching.overall_summary.recording_quality) || {};
+        let viewText = 'Unmeasured (2D lateral view)';
+        if (recQuality.camera_view_adequate === true) {
+          viewText = 'Adequate';
+        } else if (recQuality.camera_view_adequate === false) {
+          viewText = 'Suboptimal';
+        } else if (recQuality.camera_view_adequate === null || recQuality.camera_view_adequate === undefined) {
+          viewText = 'Unmeasured (2D lateral view)';
+        }
+        const contText = recQuality.tracking_continuity || 'Not assessed';
+        const covText = recQuality.posture_coverage_pct != null ? (Number(recQuality.posture_coverage_pct).toFixed(1) + '%') : 'N/A';
+
+        const summaryLine = document.createElement('div');
+        summaryLine.textContent = 'Camera view geometry: ' + viewText + ' | Tracking continuity: ' + contText + ' | Tracking coverage: ' + covText;
+        coachingQualityDetails.appendChild(summaryLine);
+
+        const distinctionNote = document.createElement('div');
+        distinctionNote.style.fontSize = '0.78rem';
+        distinctionNote.style.color = 'var(--text-muted)';
+        distinctionNote.style.marginTop = '2px';
+        distinctionNote.textContent = 'Note: 2D tracking coverage measures monocular joint visibility, not 3D camera orientation geometry.';
+        coachingQualityDetails.appendChild(distinctionNote);
+
+        if (Array.isArray(recQuality.notes) && recQuality.notes.length > 0) {
+          const notesDiv = document.createElement('div');
+          notesDiv.style.marginTop = '4px';
+          recQuality.notes.forEach(note => {
+            const noteItem = document.createElement('div');
+            noteItem.textContent = '• ' + note;
+            notesDiv.appendChild(noteItem);
+          });
+          coachingQualityDetails.appendChild(notesDiv);
+        }
+      }
+
+      if (coachingCuesList) {
+        coachingCuesList.textContent = '';
+        const cues = Array.isArray(coaching.per_repetition_cues) ? coaching.per_repetition_cues : [];
+        if (cues.length === 0) {
+          const noCues = document.createElement('div');
+          noCues.style.fontSize = '0.82rem';
+          noCues.style.color = 'var(--text-muted)';
+          noCues.textContent = 'No repetition cues generated.';
+          coachingCuesList.appendChild(noCues);
+        } else {
+          cues.forEach(cue => {
+            const cueItem = document.createElement('div');
+            cueItem.style.background = '#1e293b';
+            cueItem.style.padding = '8px 12px';
+            cueItem.style.borderRadius = '4px';
+            cueItem.style.border = '1px solid var(--card-border)';
+            cueItem.style.fontSize = '0.82rem';
+
+            const header = document.createElement('div');
+            header.style.fontWeight = '600';
+            header.style.color = 'var(--primary)';
+            const repLabel = 'Repetition #' + (cue.rep_index != null ? cue.rep_index : (cue.attempt_id != null ? cue.attempt_id : '-'));
+            const countBadge = cue.is_counted ? ' [Counted]' : ' [Uncounted]';
+            header.textContent = repLabel + countBadge;
+            cueItem.appendChild(header);
+
+            if (cue.measurements) {
+              const m = cue.measurements;
+              const mParts = [];
+              if (m.min_knee_angle_deg != null) mParts.push('Min knee: ' + Number(m.min_knee_angle_deg).toFixed(1) + '°');
+              if (m.median_torso_inclination_deg != null) mParts.push('Torso inclination: ' + Number(m.median_torso_inclination_deg).toFixed(1) + '°');
+              if (m.median_hip_angle_deg != null) mParts.push('Hip: ' + Number(m.median_hip_angle_deg).toFixed(1) + '°');
+              if (m.coverage_pct != null) mParts.push('Coverage: ' + Number(m.coverage_pct).toFixed(0) + '%');
+              if (mParts.length > 0) {
+                const mDiv = document.createElement('div');
+                mDiv.style.color = 'var(--text-muted)';
+                mDiv.style.marginTop = '2px';
+                mDiv.textContent = mParts.join(' | ');
+                cueItem.appendChild(mDiv);
+              }
+            }
+
+            if (Array.isArray(cue.observations) && cue.observations.length > 0) {
+              const obsContainer = document.createElement('div');
+              obsContainer.style.marginTop = '4px';
+              cue.observations.forEach(obs => {
+                const oDiv = document.createElement('div');
+                const conf = obs.confidence_level ? (' [' + obs.confidence_level + ']') : '';
+                oDiv.textContent = '• ' + (obs.message || obs.rule_id || '') + conf;
+                obsContainer.appendChild(oDiv);
+              });
+              cueItem.appendChild(obsContainer);
+            }
+
+            if (Array.isArray(cue.suggestions) && cue.suggestions.length > 0) {
+              const sugContainer = document.createElement('div');
+              sugContainer.style.marginTop = '4px';
+              sugContainer.style.color = '#38bdf8';
+              cue.suggestions.forEach(sug => {
+                const sDiv = document.createElement('div');
+                sDiv.textContent = '→ Suggestion: ' + (sug.message || sug.rule_id || '');
+                sugContainer.appendChild(sDiv);
+              });
+              cueItem.appendChild(sugContainer);
+            }
+
+            coachingCuesList.appendChild(cueItem);
+          });
+        }
+      }
+
+      if (coachingUncountedList) {
+        coachingUncountedList.textContent = '';
+        const uncounted = Array.isArray(coaching.uncounted_movement_explanations) ? coaching.uncounted_movement_explanations : [];
+        if (uncounted.length === 0) {
+          const noUncounted = document.createElement('div');
+          noUncounted.style.fontSize = '0.82rem';
+          noUncounted.style.color = 'var(--text-muted)';
+          noUncounted.textContent = 'No uncounted movements detected.';
+          coachingUncountedList.appendChild(noUncounted);
+        } else {
+          uncounted.forEach(item => {
+            const uDiv = document.createElement('div');
+            uDiv.style.background = '#1e293b';
+            uDiv.style.padding = '6px 10px';
+            uDiv.style.borderRadius = '4px';
+            uDiv.style.fontSize = '0.82rem';
+            uDiv.style.border = '1px solid var(--card-border)';
+
+            const title = document.createElement('div');
+            title.style.fontWeight = '600';
+            title.textContent = 'Attempt #' + (item.attempt_id != null ? item.attempt_id : '-') + ' (' + (item.reason_code || 'uncounted') + ')';
+            uDiv.appendChild(title);
+
+            const expl = document.createElement('div');
+            expl.textContent = item.explanation || '';
+            uDiv.appendChild(expl);
+
+            if (item.context_hypothesis) {
+              const hyp = document.createElement('div');
+              hyp.style.color = 'var(--warning)';
+              hyp.style.marginTop = '2px';
+              const hypMap = {
+                'possible_setup_or_weight_return': 'Possible setup or weight return (non-repetition motion)',
+                'shallow_depth': 'Shallow depth (inflection remained above configured threshold)',
+                'tracking_lost': 'Tracking lost (confidence drop, occlusion, or tracking gap)',
+                'unfinished_cycle': 'Unfinished cycle (repetition in progress or video ended early)',
+                'ambiguous': 'Ambiguous context (multiple subjects or conflicting signals)',
+                'unknown': 'Unknown context (unclassified movement event)'
+              };
+              const hypLabel = hypMap[item.context_hypothesis] || item.context_hypothesis.replace(/_/g, ' ');
+              hyp.textContent = 'Context Hypothesis: ' + hypLabel;
+              uDiv.appendChild(hyp);
+            }
+            coachingUncountedList.appendChild(uDiv);
+          });
+        }
       }
     }
     const restoredJob = new URLSearchParams(window.location.search).get('job');
     if (restoredJob && /^[0-9a-f-]{36}$/i.test(restoredJob)) {
       currentJobId = restoredJob;
       startJobTracking(restoredJob, 'Previously uploaded video');
+    }
+
+    if (typeof module !== 'undefined' && module.exports) {
+      module.exports = {
+        MAX_UPLOAD_BYTES,
+        ALLOWED_EXTENSIONS,
+        formatFileSize,
+        getFileExtension,
+        validateClientFile,
+        isValidTimestamp,
+        clearPendingSeek,
+        seekVideoToTime,
+        updateStatusBadge,
+        startJobTracking,
+        pollJobStatus,
+        stopPolling,
+        loadJobResults,
+        renderResults,
+        displayResults,
+        renderCoachingFeedback,
+      };
     }
   </script>
 </body>

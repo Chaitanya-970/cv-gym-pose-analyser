@@ -131,14 +131,19 @@ For fine-tuning, supply a reviewed explicit sequence manifest and require nonemp
 
 ## Output artifacts
 
-The pipeline produces four artifacts in `--output-dir`:
+The pipeline produces structured artifacts in `--output-dir`:
 
 1. `annotated.mp4`: Source video retaining original dimensions and framerate, overlaid with COCO skeleton lines, highlighted active limb segments, knee joint vertex circle, joint angle arc drawn via OpenCV ellipse, and the repetition counter HUD banner.
 2. `angles.csv`: Per-frame tabular data with columns:
    `frame_index, video_time_s, track_id, selected_side, knee_angle_deg, confidence, valid, reason, stage, completed_reps, posture_side, torso_inclination_deg, hip_angle_deg, torso_reason, hip_reason`.
    Missing numeric values are blank strings, never zeros. Valid frames report the actual observed side even during arming.
-3. `summary.json`: Run metadata including Python and package versions, configuration parameters, source declared frame count and duration, processed frame count and duration, valid observation count and fraction, completed repetition count, read status note, and explicit limitations.
+3. `summary.json`: Run metadata including Python and package versions, configuration parameters, source declared frame count and duration, processed frame count and duration, valid observation count and fraction, completed repetition count, read status note, output paths, and explicit limitations.
 4. `angle_plot.png`: Matplotlib time series plot of knee angles over video time. Missing and invalid frames appear as gaps in the curve rather than connected lines.
+5. `attempts.json`: Frame and time boundaries for all observed movement attempts with minimum observed knee flexion and neutral resolution reasons.
+6. `posture_summary.json`: Minimum, maximum, and median torso inclination and hip angles per attempt with measurement frame coverage.
+7. `feedback_observations.json`: Explanations and within-video group comparisons of measured counted cycles on matching tracking contexts and body sides.
+8. `feedback_phases.json`: Phase-localized turnaround and return-phase measurements for counted cycles.
+9. `coaching_feedback.json`: Structured, non-normative coaching telemetry conforming to `FEEDBACK_CONTRACT_38.md`. Provides overall recording quality (tracking continuity, measurement coverage), per-repetition depth and pacing cues linked to timestamps, setup and review suggestions, and uncounted movement context hypotheses (distinguishing equipment setup/weight return, shallow depth, tracking loss, unfinished cycles, ambiguous context, and unknown events). All measurements reflect descriptive 2D planar kinematics from monocular video rather than 3D anatomical angles or calibrated camera geometry; 3D camera orientation adequacy (`camera_view_adequate`) is unmeasured (`null`) by default because single-camera monocular tracking cannot establish orthogonal perspective alignment. Includes explicit non-diagnostic clinical disclaimer and UNVALIDATED human validation status notice.
 
 ## Third-party credits
 
@@ -209,6 +214,8 @@ The web server also hosts the raw-video human review workspace directly under `/
 The downloadable `feedback_observations.json` adds explanations and within-video comparisons of measured counted cycles on the same track and body side. It reports torso inclination and projected knee-angle variation, excludes uncounted setup/return movements from comparisons, and explains missing measurements. Coverage settings are operational filters, not validated technique standards. The web results show these observations alongside each movement. Older result folders without this artifact remain readable.
 
 The additional `feedback_phases.json` locates the minimum observed knee angle and return-phase measurements within counted cycles. Web results provide seek buttons for reviewing those moments. These are attention guides based on projected measurements, not validated technique grades; missing timing or measurement evidence is reported explicitly.
+
+The downloadable `coaching_feedback.json` consolidates actionable telemetry into a dedicated Coaching Feedback card in the web interface. It reports recording quality assessments (distinguishing 2D tracking continuity and joint visibility coverage from 3D camera orientation geometry, with camera view adequacy rendered as unmeasured by default), per-repetition pacing and turnaround depth cues with video review suggestions, and uncounted movement context hypotheses (`possible_setup_or_weight_return`, `shallow_depth`, `tracking_lost`, `unfinished_cycle`, `ambiguous`, `unknown`). All feedback is rendered safely via DOM text APIs with clear clinical non-diagnostic disclaimers and an UNVALIDATED status banner.
 
 Keep web dependencies separate from the inference environment on Windows:
 

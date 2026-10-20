@@ -35,6 +35,7 @@ ALLOWED_ARTIFACTS: Dict[str, str] = {
     "posture_summary.json": "application/json",
     "feedback_observations.json": "application/json",
     "feedback_phases.json": "application/json",
+    "coaching_feedback.json": "application/json",
     "angles.csv": "text/csv; charset=utf-8",
     "angle_plot.png": "image/png",
     "annotated.mp4": "video/mp4",
@@ -510,6 +511,14 @@ class JobManager:
             except (OSError, ValueError):
                 pass
 
+        coaching_feedback_data = None
+        coaching_feedback_path = results_dir / "coaching_feedback.json"
+        if coaching_feedback_path.is_file() and coaching_feedback_path.resolve().parent == results_dir:
+            try:
+                coaching_feedback_data = json.loads(coaching_feedback_path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                pass
+
         completed_reps = 0
         processed_frames = 0
         read_status_note = meta.get("read_status_note")
@@ -538,5 +547,6 @@ class JobManager:
             "posture_summary": posture_data,
             "feedback_observations": feedback_data,
             "phase_feedback": phase_feedback_data,
+            "coaching_feedback": coaching_feedback_data,
             "available_artifacts": available_artifacts,
         }
