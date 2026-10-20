@@ -66,18 +66,38 @@ INDEX_HTML = """<html lang="en">
       --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
       --touch-min: 44px;
     }
+    html {
+      overflow-x: hidden;
+      box-sizing: border-box;
+    }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     *:focus-visible {
       outline: 3px solid var(--primary);
       outline-offset: 2px;
+    }
+    .btn:focus-visible,
+    .btn-secondary:focus-visible,
+    .btn-seek:focus-visible,
+    .review-nav-link:focus-visible,
+    .file-input-wrapper:focus-visible,
+    .table-responsive:focus-visible,
+    a:focus-visible,
+    button:focus-visible,
+    input:focus-visible {
+      outline: 3px solid var(--primary);
+      outline-offset: 2px;
+      box-shadow: 0 0 0 4px rgba(56, 189, 248, 0.35);
     }
     body {
       background: var(--bg);
       color: var(--text);
       font-family: var(--font);
       line-height: 1.5;
-      padding: clamp(12px, 2.5vw, 24px) clamp(8px, 2vw, 16px);
+      padding: clamp(10px, 2.5vw, 24px) clamp(8px, 2vw, 16px);
       min-height: 100vh;
+      overflow-x: hidden;
+      width: 100%;
+      max-width: 100vw;
     }
     .container {
       max-width: 980px;
@@ -86,6 +106,8 @@ INDEX_HTML = """<html lang="en">
       display: flex;
       flex-direction: column;
       gap: 20px;
+      word-wrap: break-word;
+      overflow-wrap: break-word;
     }
     header { text-align: center; margin-bottom: 8px; }
     header h1 {
@@ -103,8 +125,11 @@ INDEX_HTML = """<html lang="en">
       background: var(--card-bg);
       border: 1px solid var(--card-border);
       border-radius: 8px;
-      padding: clamp(14px, 3vw, 20px);
+      padding: clamp(12px, 3vw, 20px);
       overflow: hidden;
+      max-width: 100%;
+      word-wrap: break-word;
+      overflow-wrap: break-word;
     }
     .card h2 {
       font-size: clamp(1.05rem, 2.5vw, 1.15rem);
@@ -123,6 +148,9 @@ INDEX_HTML = """<html lang="en">
       flex-direction: column;
       gap: 8px;
       line-height: 1.45;
+      word-wrap: break-word;
+      overflow-wrap: break-word;
+      max-width: 100%;
     }
     .notice-box strong { color: var(--text); }
     .upload-form { display: flex; flex-direction: column; gap: 14px; }
@@ -280,8 +308,10 @@ INDEX_HTML = """<html lang="en">
     .status-queued { background: #0284c7; color: #fff; }
     .status-running { background: #d97706; color: #fff; animation: pulse 1.8s infinite; }
     .status-completed { background: #16a34a; color: #fff; }
-    .status-incomplete { background: #eab308; color: #000; }
+    .status-incomplete { background: #eab308; color: #000; font-weight: 700; border: 1px solid #ca8a04; }
     .status-failed, .status-interrupted { background: #dc2626; color: #fff; }
+    .status-unavailable { background: #475569; color: #f8fafc; border: 1px solid #64748b; font-weight: 600; }
+    .status-unvalidated { background: #334155; color: #f8fafc; border: 1px solid #475569; font-weight: 600; }
     @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.6; } 100% { opacity: 1; } }
     .hidden { display: none !important; }
     .status-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; flex-wrap: wrap; gap: 8px; }
@@ -297,11 +327,14 @@ INDEX_HTML = """<html lang="en">
       border-radius: 6px;
       padding: 14px 16px;
       text-align: center;
+      word-break: break-word;
+      overflow-wrap: break-word;
     }
     .metric-value { font-size: 1.75rem; font-weight: 700; color: var(--primary); }
     .metric-label { font-size: 0.8rem; color: var(--text-muted); text-transform: uppercase; margin-top: 4px; }
     .table-responsive {
       width: 100%;
+      max-width: 100%;
       overflow-x: auto;
       -webkit-overflow-scrolling: touch;
       margin-top: 12px;
@@ -319,6 +352,8 @@ INDEX_HTML = """<html lang="en">
       padding: 10px 12px;
       text-align: left;
       vertical-align: top;
+      word-break: break-word;
+      overflow-wrap: break-word;
     }
     .data-table th { background: #0f172a; color: var(--text-muted); font-weight: 600; }
     .data-table tr:nth-child(even) { background: #172033; }
@@ -336,6 +371,8 @@ INDEX_HTML = """<html lang="en">
       display: flex;
       flex-direction: column;
       gap: 10px;
+      max-width: 100%;
+      overflow: hidden;
     }
     .media-box img, .media-box video {
       width: 100%;
@@ -345,12 +382,19 @@ INDEX_HTML = """<html lang="en">
       background: #000;
     }
     .media-caption { font-size: 0.82rem; color: var(--text-muted); }
-    .downloads-wrapper { width: 100%; }
+    .downloads-wrapper { width: 100%; max-width: 100%; }
     .downloads-grid {
       display: flex;
       flex-wrap: wrap;
       gap: 10px;
       margin-top: 12px;
+      width: 100%;
+      max-width: 100%;
+    }
+    .btn-secondary {
+      max-width: 100%;
+      word-break: break-word;
+      overflow-wrap: break-word;
     }
     .alert-box {
       padding: 12px 16px;
@@ -358,6 +402,9 @@ INDEX_HTML = """<html lang="en">
       font-size: 0.88rem;
       margin-top: 12px;
       line-height: 1.45;
+      word-break: break-word;
+      overflow-wrap: break-word;
+      max-width: 100%;
     }
     .alert-danger { background: #450a0a; border: 1px solid #7f1d1d; color: #fca5a5; }
     .alert-warning { background: #451a03; border: 1px solid #78350f; color: #fde68a; }
@@ -366,6 +413,30 @@ INDEX_HTML = """<html lang="en">
       .btn-secondary { width: 100%; text-align: center; }
       .status-header { flex-direction: column; align-items: flex-start; }
       .metrics-grid { grid-template-columns: 1fr 1fr; }
+    }
+    @media (max-width: 420px) {
+      body {
+        padding: 8px 6px;
+      }
+      .card {
+        padding: 10px 8px;
+      }
+      .metrics-grid {
+        grid-template-columns: 1fr;
+      }
+      .downloads-grid {
+        flex-direction: column;
+      }
+      .downloads-grid .btn-secondary {
+        width: 100%;
+      }
+      .review-nav-link {
+        width: 100%;
+        text-align: center;
+      }
+      .phase-feedback-block .btn-seek {
+        width: 100%;
+      }
     }
   </style>
 </head>
@@ -517,6 +588,7 @@ INDEX_HTML = """<html lang="en">
               <source id="video-source" src="" type="video/mp4">
               Your browser does not support HTML5 video playback.
             </video>
+            <div id="video-seek-status" class="sr-only" role="status" aria-live="polite"></div>
           </div>
           <div id="video-fallback-notice" class="notice-box" style="margin-top: 8px;">
             <strong>Browser Playback Notice:</strong> Video preview is rendered in OpenCV mp4v format. Some web browsers require H.264 streams and may display a blank player. If playback does not start, use the download links below to view the video in VLC or your local media player.
@@ -577,6 +649,7 @@ INDEX_HTML = """<html lang="en">
     const annotatedVideo = document.getElementById('annotated-video');
     const videoSource = document.getElementById('video-source');
     const downloadsContainer = document.getElementById('downloads-container');
+    const videoSeekStatus = document.getElementById('video-seek-status');
 
     let currentJobId = null;
     let pollInterval = null;
@@ -663,12 +736,25 @@ INDEX_HTML = """<html lang="en">
       return typeof val === 'number' && Number.isFinite(val) && val >= 0;
     }
 
+    function announceSeekStatus(msg) {
+      const el = document.getElementById('video-seek-status');
+      if (el) {
+        el.textContent = msg;
+      }
+    }
+
     function seekVideoToTime(targetTime) {
-      if (!isValidTimestamp(targetTime)) return;
+      if (!isValidTimestamp(targetTime)) {
+        announceSeekStatus('Invalid seek target timestamp.');
+        return;
+      }
       const t = Number(targetTime);
       clearPendingSeek();
 
-      if (!annotatedVideo) return;
+      if (!annotatedVideo) {
+        announceSeekStatus('Video player is not available on this page.');
+        return;
+      }
 
       const applySeek = () => {
         let seekTo = t;
@@ -679,12 +765,16 @@ INDEX_HTML = """<html lang="en">
         }
         try {
           annotatedVideo.currentTime = seekTo;
-        } catch (e) {}
+          announceSeekStatus('Seeked video to ' + seekTo.toFixed(2) + ' seconds.');
+        } catch (e) {
+          announceSeekStatus('Failed to seek video: playback error.');
+        }
       };
 
       if (annotatedVideo.readyState >= 1 && typeof annotatedVideo.duration === 'number' && Number.isFinite(annotatedVideo.duration)) {
         applySeek();
       } else {
+        announceSeekStatus('Video metadata loading. Seek to ' + t.toFixed(2) + ' seconds queued.');
         let timerId = null;
         const onLoaded = () => {
           cleanup();
@@ -704,6 +794,7 @@ INDEX_HTML = """<html lang="en">
         annotatedVideo.addEventListener('loadedmetadata', onLoaded);
         timerId = setTimeout(() => {
           cleanup();
+          announceSeekStatus('Video load timed out. Seeking to ' + t.toFixed(2) + 's could not be completed.');
         }, 5000);
         pendingSeekCleanup = cleanup;
       }
@@ -920,7 +1011,14 @@ INDEX_HTML = """<html lang="en">
       const norm = (status || 'unknown').toLowerCase();
       const label = norm.toUpperCase();
       statusBadge.className = 'status-badge status-' + norm;
-      statusBadge.setAttribute('aria-label', 'Job status: ' + label);
+      let statusDesc = label;
+      if (norm === 'queued') statusDesc = 'QUEUED (Waiting in processing queue)';
+      else if (norm === 'running') statusDesc = 'RUNNING (Analysis in progress)';
+      else if (norm === 'completed') statusDesc = 'COMPLETED (Full video processed)';
+      else if (norm === 'incomplete') statusDesc = 'INCOMPLETE (Partial decoded prefix only)';
+      else if (norm === 'failed') statusDesc = 'FAILED (Analysis failed with error)';
+      else if (norm === 'interrupted') statusDesc = 'INTERRUPTED (Analysis stopped prematurely)';
+      statusBadge.setAttribute('aria-label', 'Job status: ' + statusDesc);
       const statusEl = document.getElementById('job-status');
       if (statusEl) {
         statusEl.textContent = label;
@@ -1183,13 +1281,25 @@ INDEX_HTML = """<html lang="en">
                   const btn = document.createElement('button');
                   btn.type = 'button';
                   btn.className = 'btn-seek';
-                  btn.textContent = 'Seek turnaround (' + Number(tKnee).toFixed(2) + 's)';
+                  btn.setAttribute('role', 'button');
+                  btn.setAttribute('tabindex', '0');
+                  const tStr = Number(tKnee).toFixed(2);
+                  const attNum = att.attempt_id != null ? String(att.attempt_id) : '';
+                  btn.textContent = 'Seek turnaround (' + tStr + 's)';
                   btn.title = 'Seek video to turnaround candidate point';
-                  btn.addEventListener('click', (e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
+                  btn.setAttribute('aria-label', 'Seek video to turnaround candidate at ' + tStr + 's' + (attNum ? ' for attempt #' + attNum : ''));
+                  const doSeekKnee = (e) => {
+                    if (e) {
+                      if (e.type === 'keydown' && e.key !== 'Enter' && e.key !== ' ' && e.key !== 'Spacebar') {
+                        return;
+                      }
+                      e.preventDefault();
+                      e.stopPropagation();
+                    }
                     seekVideoToTime(tKnee);
-                  });
+                  };
+                  btn.addEventListener('click', doSeekKnee);
+                  btn.addEventListener('keydown', doSeekKnee);
                   btnContainer.appendChild(btn);
                 } else {
                   hasTimestampAction = true;
@@ -1208,13 +1318,25 @@ INDEX_HTML = """<html lang="en">
                   const btn = document.createElement('button');
                   btn.type = 'button';
                   btn.className = 'btn-seek';
-                  btn.textContent = 'Seek return (' + Number(tRet).toFixed(2) + 's)';
+                  btn.setAttribute('role', 'button');
+                  btn.setAttribute('tabindex', '0');
+                  const tStr = Number(tRet).toFixed(2);
+                  const attNum = att.attempt_id != null ? String(att.attempt_id) : '';
+                  btn.textContent = 'Seek return (' + tStr + 's)';
                   btn.title = 'Seek video to return phase start';
-                  btn.addEventListener('click', (e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
+                  btn.setAttribute('aria-label', 'Seek video to return phase start at ' + tStr + 's' + (attNum ? ' for attempt #' + attNum : ''));
+                  const doSeekRet = (e) => {
+                    if (e) {
+                      if (e.type === 'keydown' && e.key !== 'Enter' && e.key !== ' ' && e.key !== 'Spacebar') {
+                        return;
+                      }
+                      e.preventDefault();
+                      e.stopPropagation();
+                    }
                     seekVideoToTime(tRet);
-                  });
+                  };
+                  btn.addEventListener('click', doSeekRet);
+                  btn.addEventListener('keydown', doSeekRet);
                   btnContainer.appendChild(btn);
                 } else if (phaseAtt.return_phase.delta_start_frame != null) {
                   hasTimestampAction = true;
@@ -1270,9 +1392,18 @@ INDEX_HTML = """<html lang="en">
             const a = document.createElement('a');
             a.href = item.download_url || ('/api/jobs/' + encodeURIComponent(data.job_id) + '/download/' + encodeURIComponent(name));
             a.className = 'btn-secondary';
+            const sizeStr = item.size_bytes ? ' (' + formatFileSize(item.size_bytes) + ')' : '';
             a.textContent = 'Download ' + name + (item.size_bytes ? ' (' + (item.size_bytes / 1024).toFixed(0) + ' KB)' : '');
             a.setAttribute('download', name);
             a.setAttribute('role', 'button');
+            a.setAttribute('tabindex', '0');
+            a.setAttribute('aria-label', 'Download ' + name + sizeStr);
+            a.addEventListener('keydown', (e) => {
+              if (e.key === ' ' || e.key === 'Spacebar') {
+                e.preventDefault();
+                a.click();
+              }
+            });
             downloadsContainer.appendChild(a);
           }
         });
@@ -1303,6 +1434,8 @@ INDEX_HTML = """<html lang="en">
       if (isUnavailable) {
         if (coachingStatusBadge) {
           coachingStatusBadge.textContent = 'UNAVAILABLE';
+          coachingStatusBadge.className = 'status-badge status-unavailable';
+          coachingStatusBadge.setAttribute('aria-label', 'Coaching status: UNAVAILABLE (Telemetry is not available for this run)');
           coachingStatusBadge.style.background = '#475569';
         }
         if (coachingQualityDetails) coachingQualityDetails.textContent = 'Coaching telemetry is not available for this run.';
@@ -1320,6 +1453,9 @@ INDEX_HTML = """<html lang="en">
       if (coachingStatusBadge) {
         const rawStatus = (coaching.status || 'UNVALIDATED').toUpperCase();
         coachingStatusBadge.textContent = rawStatus;
+        const normStatus = rawStatus.toLowerCase();
+        coachingStatusBadge.className = 'status-badge status-' + normStatus;
+        coachingStatusBadge.setAttribute('aria-label', 'Coaching status: ' + rawStatus);
       }
       if (coachingClinicalDisclaimer && coaching.disclaimers && coaching.disclaimers.clinical_disclaimer) {
         coachingClinicalDisclaimer.textContent = coaching.disclaimers.clinical_disclaimer;
@@ -1520,6 +1656,7 @@ INDEX_HTML = """<html lang="en">
         outerGlobal.stopPolling = stopPolling;
         outerGlobal.clearPendingSeek = clearPendingSeek;
         outerGlobal.seekVideoToTime = seekVideoToTime;
+        outerGlobal.announceSeekStatus = announceSeekStatus;
         outerGlobal.validateClientFile = validateClientFile;
       }
     } catch (_) {}
@@ -1535,6 +1672,7 @@ INDEX_HTML = """<html lang="en">
         isValidTimestamp,
         clearPendingSeek,
         seekVideoToTime,
+        announceSeekStatus,
         updateStatusBadge,
         startJobTracking,
         pollJobStatus,
