@@ -58,13 +58,17 @@ def visible_foot_pairs(landmarks, width, height, min_visibility=.5, min_presence
 
 class MediaPipeLandmarker:
     """Explicit image/video provider with strict time ordering and owned cleanup."""
-    def __init__(self, model_path, mode="image"):
+    def __init__(self, model_path, mode="image", *, smooth_video=False):
         self.model_path = Path(model_path).resolve()
         if not self.model_path.is_file():
             raise FileNotFoundError("Local auxiliary pose model is missing; automatic download disabled")
         if mode not in ("image", "video"):
             raise ValueError("mode must be image or video")
-        self.mode = mode; self._detector = None; self._mp = None; self._last_timestamp = None
+        if not isinstance(smooth_video, bool) or (smooth_video and mode != "video"):
+            raise ValueError("smooth_video requires a boolean and video mode")
+        self.smooth_video = smooth_video
+        self.mode = mode; self._detector = None; self._guard = None
+        self._mp = None; self._last_timestamp = None
 
     def __enter__(self):
         if self._detector is not None:
@@ -76,9 +80,21 @@ class MediaPipeLandmarker:
         running = mp.tasks.vision.RunningMode.IMAGE if self.mode == "image" else mp.tasks.vision.RunningMode.VIDEO
         options = mp.tasks.vision.PoseLandmarkerOptions(
             base_options=mp.tasks.BaseOptions(model_asset_path=str(self.model_path)),
-            running_mode=running, num_poses=2,
+            running_mode=running, num_poses=1 if self.smooth_video else 2,
             min_pose_detection_confidence=.5, min_pose_presence_confidence=.5)
-        self._detector = mp.tasks.vision.PoseLandmarker.create_from_options(options)
+        try:
+            self._detector = mp.tasks.vision.PoseLandmarker.create_from_options(options)
+            if self.smooth_video:
+                # Single-pose streaming enables MediaPipe temporal smoothing.
+                # An independent IMAGE detector retains multi-person screening.
+                guard_options = mp.tasks.vision.PoseLandmarkerOptions(
+                    base_options=mp.tasks.BaseOptions(model_asset_path=str(self.model_path)),
+                    running_mode=mp.tasks.vision.RunningMode.IMAGE, num_poses=2,
+                    min_pose_detection_confidence=.5, min_pose_presence_confidence=.5)
+                self._guard = mp.tasks.vision.PoseLandmarker.create_from_options(guard_options)
+        except BaseException:
+            self.__exit__(None, None, None)
+            raise
         self._mp = mp; self._last_timestamp = None
         return self
 
@@ -96,22 +112,33 @@ class MediaPipeLandmarker:
         elif timestamp_ms is not None:
             raise ValueError("Image mode does not consume video timestamps")
         image = self._mp.Image(image_format=self._mp.ImageFormat.SRGB, data=frame)
+        guard_result = self._guard.detect(image) if self._guard is not None else None
         if self.mode == "video":
             result = self._detector.detect_for_video(image, timestamp_ms)
             self._last_timestamp = timestamp_ms
         else:
             result = self._detector.detect(image)
+        guard_count = len(guard_result.pose_landmarks) if guard_result is not None else None
+        if guard_count is not None and guard_count != 1:
+            result = guard_result
         poses = [serialize_landmarks(points, width, height) for points in result.pose_landmarks]
         reason = "single_person" if len(poses) == 1 else ("no_person" if not poses else "multiple_people")
         feet = visible_foot_pairs(poses[0], width, height) if len(poses) == 1 else []
         return {"landmark_schema": "mediapipe33", "measurement_basis": "model_estimate",
+                "landmark_processing": "guarded_single_person_video" if self.smooth_video else "multi_person_unsmoothed",
+                "guard_person_count": guard_count,
                 "width": width, "height": height, "timestamp_ms": timestamp_ms,
                 "person_count": len(poses), "reason": reason, "poses": poses,
                 "foot_pair_available": feet, "technique_accuracy": "not_validated"}
 
     def __exit__(self, exc_type, exc, traceback):
-        if self._detector is not None:
-            try:
-                self._detector.close()
-            finally:
-                self._detector = None; self._mp = None; self._last_timestamp = None
+        # Close both owned native resources even if either close raises.
+        detector, guard = self._detector, self._guard
+        self._detector = None; self._guard = None
+        self._mp = None; self._last_timestamp = None
+        try:
+            if detector is not None:
+                detector.close()
+        finally:
+            if guard is not None:
+                guard.close()
