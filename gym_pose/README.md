@@ -307,3 +307,12 @@ Remove-Item Env:PYTHONPATH
 ```
 
 This combines existing optional-web and ML dependencies for testing without installations. A single environment with both requirements files installed can run discovery directly. The web-only environment cannot run ML-dependent tests. GPU-specific setup varies by platform; model/data/media remain local and excluded from Git.
+
+
+## Optional heel/toe landmark provider
+
+`gym_analyser.auxiliary_pose.MediaPipeLandmarker` exposes a separate MediaPipe33 image/video provider. It requires an explicitly supplied local `.task` model and the optional MediaPipe runtime (verified with 1.1.1); it does not download assets or import MediaPipe during ordinary analyser startup. See the [official model/API guide](https://developers.google.com/edge/mediapipe/solutions/vision/pose_landmarker/python) for runtime and model setup. Install optional dependencies in a separate environment if they conflict with the existing ML stack.
+
+Use it as a context manager, then call `detect_rgb(original_rgb_uint8_frame)` in image mode, or `detect_rgb(frame, timestamp_ms)` in video mode with strictly increasing integer milliseconds. Outputs preserve original-image pixel coordinates, person count, visibility/presence, and available heel/toe pairs. Off-screen estimates are preserved and excluded from availability. Multiple-person/no-person outputs do not establish foot availability.
+
+This is a prerequisite component, not a heel-lift or other technique-fault detector, and is not wired into the web application. Confidence/availability does not establish anatomical accuracy or foot contact. The existing YOLO counter and selected checkpoint remain active. Real image-mode conformance was checked on 12 frames; video timestamp guards have unit coverage, but real video tracking has not yet been validated. Back rounding requires evidence beyond these landmarks.
