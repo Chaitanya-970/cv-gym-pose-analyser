@@ -1018,8 +1018,8 @@ class TestCoachingFeedback(unittest.TestCase):
         # Occurred before the first counted rep -> possible_setup_or_weight_return
         self.assertEqual(unc[0]["context_hypothesis"], "possible_setup_or_weight_return")
 
-    def test_uncounted_between_counted_reps_is_shallow_depth(self):
-        """Verify uncounted attempt between counted reps produces shallow_depth."""
+    def test_uncounted_between_counted_reps_remains_ambiguous(self):
+        """Temporal placement between counted reps does not establish a separate shallow attempt."""
         attempts = {
             "counted_attempts": 2,
             "uncounted_attempts": 1,
@@ -1037,7 +1037,7 @@ class TestCoachingFeedback(unittest.TestCase):
         result = generate_coaching_feedback(summary={"completed_reps": 2}, attempts=attempts)
         unc = result["uncounted_movement_explanations"]
         self.assertEqual(len(unc), 1)
-        self.assertEqual(unc[0]["context_hypothesis"], "shallow_depth")
+        self.assertEqual(unc[0]["context_hypothesis"], "ambiguous")
 
     def test_uncounted_no_counted_reps_in_session_is_ambiguous(self):
         """Verify depth_threshold_not_reached with no counted reps produces ambiguous."""

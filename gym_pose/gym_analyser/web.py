@@ -39,6 +39,7 @@ except ImportError:
 
 from .web_jobs import (
     ALLOWED_ARTIFACTS,
+    ALLOWED_EXTENSIONS,
     DEFAULT_MAX_UPLOAD_BYTES,
     JobBusyError,
     JobManager,
@@ -455,7 +456,7 @@ INDEX_HTML = """<html lang="en">
         <div><strong>Human Review:</strong> To reduce prediction-induced bias, review and record raw video repetitions in the <a href="/review/" style="color: var(--primary); text-decoration: underline;">Human Review Workspace</a> before running automated model analysis.</div>
         <div><strong>Camera Setup:</strong> Single-person, stationary camera at waist height perpendicular to movement plane, showing full body from head to feet in side view.</div>
         <div><strong>Kinematic Feedback:</strong> Measurements represent projected 2D coordinates from this single camera view. They do not constitute clinical safety evaluations or medical form judgements.</div>
-        <div><strong>Uncounted Movements:</strong> Movements not meeting threshold criteria (such as stance setup, weight pickup, or weight return) are reported as uncounted attempts. An uncounted event does not indicate bad form.</div>
+        <div><strong>Unconfirmed Segments:</strong> The detector may log brief movements that do not form a counted cycle. These may belong to a nearby squat, setup or tracking noise; they are not necessarily extra attempts or bad form.</div>
       </div>
     </div>
 
@@ -495,13 +496,14 @@ INDEX_HTML = """<html lang="en">
           <div class="metric-value" id="metric-reps">0</div>
           <div class="metric-label" id="metric-reps-label">Completed Repetitions</div>
         </div>
-        <div class="metric-card">
+        <!-- Raw detector record count is not a distinct human movement count. -->
+        <div class="metric-card hidden" aria-hidden="true">
           <div class="metric-value" id="metric-attempts">0</div>
-          <div class="metric-label">Observed Movements</div>
+          <div class="metric-label">Detector Records</div>
         </div>
         <div class="metric-card">
           <div class="metric-value" id="metric-uncounted">0</div>
-          <div class="metric-label">Uncounted Attempts</div>
+          <div class="metric-label">Unconfirmed Segments</div>
         </div>
         <div class="metric-card">
           <div class="metric-value" id="metric-frames">0</div>
@@ -544,7 +546,7 @@ INDEX_HTML = """<html lang="en">
           </div>
 
           <div id="coaching-uncounted-box" style="margin-bottom: 6px;">
-            <strong style="font-size: 0.88rem;">Uncounted Movement Context &amp; Hypotheses:</strong>
+            <strong style="font-size: 0.88rem;">Unconfirmed Segment Context &amp; Hypotheses:</strong>
             <div id="coaching-uncounted-list" style="margin-top: 6px; display: flex; flex-direction: column; gap: 6px;"></div>
           </div>
         </div>
@@ -554,7 +556,7 @@ INDEX_HTML = """<html lang="en">
       <div style="margin-top: 16px;">
         <h3>Observed Movement Events</h3>
         <p style="font-size: 0.82rem; color: var(--text-muted); margin-top: 4px;">
-          Includes counted repetitions and uncounted events (e.g. setup, depth threshold not reached, tracking interruption).
+          Includes counted repetitions and unconfirmed detector segments. A segment may belong to a nearby squat; it is not proof of a separate attempt.
         </p>
         <div class="table-responsive" tabindex="0" role="region" aria-label="Observed Movement Events table">
           <table class="data-table" id="attempts-table">
@@ -658,6 +660,7 @@ INDEX_HTML = """<html lang="en">
     let pendingSeekCleanup = null;
     let selectedFile = null;
     let isSubmitting = false;
+    let activeVideoDuration = null;
 
     function formatFileSize(bytes) {
       if (typeof bytes !== 'number' || !Number.isFinite(bytes) || bytes < 0) return '0 B';
@@ -757,12 +760,20 @@ INDEX_HTML = """<html lang="en">
       }
 
       const applySeek = () => {
-        let seekTo = t;
+        let maxDur = null;
         if (typeof annotatedVideo.duration === 'number' && Number.isFinite(annotatedVideo.duration) && annotatedVideo.duration > 0) {
-          seekTo = Math.max(0, Math.min(t, annotatedVideo.duration));
+          maxDur = annotatedVideo.duration;
+        } else if (typeof activeVideoDuration === 'number' && Number.isFinite(activeVideoDuration) && activeVideoDuration > 0) {
+          maxDur = activeVideoDuration;
+        }
+
+        let seekTo = t;
+        if (maxDur !== null) {
+          seekTo = Math.max(0, Math.min(t, maxDur));
         } else {
           seekTo = Math.max(0, t);
         }
+
         try {
           annotatedVideo.currentTime = seekTo;
           announceSeekStatus('Seeked video to ' + seekTo.toFixed(2) + ' seconds.');
@@ -943,6 +954,24 @@ INDEX_HTML = """<html lang="en">
       }
       clearPendingSeek();
       currentJobId = jobId;
+      activeVideoDuration = null;
+
+      if (annotatedVideo) {
+        try { annotatedVideo.pause(); } catch (_) {}
+      }
+      if (videoSource) {
+        videoSource.removeAttribute('src');
+      }
+      if (annotatedVideo) {
+        try { annotatedVideo.load(); } catch (_) {}
+      }
+      if (anglePlotImg) {
+        anglePlotImg.removeAttribute('src');
+      }
+      if (videoSeekStatus) {
+        videoSeekStatus.textContent = '';
+      }
+
       statusCard.classList.remove('hidden');
       resultsCard.classList.add('hidden');
       jobIdDisplay.textContent = jobId;
@@ -965,10 +994,10 @@ INDEX_HTML = """<html lang="en">
         const res = await fetch('/api/jobs/' + encodeURIComponent(jobId));
         if (jobId !== currentJobId || requestVersion !== statusRequestVersion) return;
         if (!res.ok) {
-          if (res.status === 404) {
+          if (res.status === 404 || res.status === 400) {
             stopPolling();
             updateStatusBadge('failed');
-            jobErrorBox.textContent = 'Job not found on server.';
+            jobErrorBox.textContent = (res.status === 400) ? 'Invalid job ID format.' : 'Job not found on server.';
             jobErrorBox.classList.remove('hidden');
             submitBtn.disabled = false;
             submitBtn.textContent = 'Analyze Video';
@@ -1077,11 +1106,21 @@ INDEX_HTML = """<html lang="en">
         return;
       }
 
-      const repsVal = data.completed_reps != null ? String(data.completed_reps) : '0';
-      metricReps.textContent = repsVal;
-      metricFrames.textContent = data.processed_frames != null ? String(data.processed_frames) : '0';
+      activeVideoDuration = null;
+      if (data.summary) {
+        if (typeof data.summary.processed_duration_s === 'number' && Number.isFinite(data.summary.processed_duration_s) && data.summary.processed_duration_s > 0) {
+          activeVideoDuration = data.summary.processed_duration_s;
+        } else if (data.summary.source_video && typeof data.summary.source_video.declared_duration_s === 'number' && Number.isFinite(data.summary.source_video.declared_duration_s) && data.summary.source_video.declared_duration_s > 0) {
+          activeVideoDuration = data.summary.source_video.declared_duration_s;
+        }
+      }
 
       const attemptsList = (data.attempts && data.attempts.events) ? data.attempts.events : [];
+      // Preserve the authoritative summary count, including zero. Artifact
+      // disagreement is a warning, not permission to choose a positive count.
+      const repsVal = data.completed_reps != null ? String(data.completed_reps) : 'Unavailable';
+      metricReps.textContent = repsVal;
+      metricFrames.textContent = data.processed_frames != null ? String(data.processed_frames) : '0';
       metricAttempts.textContent = String(attemptsList.length);
 
       const uncountedCount = attemptsList.filter(e => e.status === 'uncounted').length;
@@ -1120,6 +1159,12 @@ INDEX_HTML = """<html lang="en">
         incompleteNoteBox.classList.add('hidden');
       }
 
+      if (data.count_consistency && data.count_consistency.status === 'conflict') {
+        const warning = 'Saved result counts disagree. The displayed count comes from the analysis summary; inspect the downloaded artifacts before relying on it.';
+        incompleteNoteText.textContent = (data.status === 'incomplete' ? incompleteNoteText.textContent + ' ' : '') + warning;
+        incompleteNoteBox.classList.remove('hidden');
+      }
+
       const phaseFeedback = data.phase_feedback || (data.summary && data.summary.phase_feedback) || null;
       const phaseFeedbackMap = {};
       if (phaseFeedback && Array.isArray(phaseFeedback.attempts)) {
@@ -1148,7 +1193,7 @@ INDEX_HTML = """<html lang="en">
       if (!sessionTexts.length) sessionTexts.push('No within-session comparison is available for this analysis.');
       sessionTexts.forEach(text => {
         const paragraph = document.createElement('p');
-        paragraph.textContent = text;
+        paragraph.textContent = String(text).replace(/uncounted movement\(s\)/g, 'unconfirmed segment(s)');
         sessionContainer.appendChild(paragraph);
       });
       if (phaseFeedback && Array.isArray(phaseFeedback.biomechanical_limitations) && phaseFeedback.biomechanical_limitations.length > 0) {
@@ -1196,7 +1241,7 @@ INDEX_HTML = """<html lang="en">
 
           const tdStatus = document.createElement('td');
           const spanStatus = document.createElement('span');
-          spanStatus.textContent = (att.status || 'uncounted').toUpperCase();
+          spanStatus.textContent = att.status === 'counted' ? 'COUNTED' : 'UNCONFIRMED SEGMENT';
           spanStatus.className = 'status-badge ' + (att.status === 'counted' ? 'status-completed' : 'status-incomplete');
           tdStatus.appendChild(spanStatus);
           row.appendChild(tdStatus);
@@ -1277,13 +1322,17 @@ INDEX_HTML = """<html lang="en">
               if (phaseAtt.min_knee_point) {
                 const tKnee = phaseAtt.min_knee_point.video_time_s;
                 if (isValidTimestamp(tKnee)) {
+                  let tKneeNum = Number(tKnee);
+                  if (activeVideoDuration !== null && tKneeNum > activeVideoDuration) {
+                    tKneeNum = activeVideoDuration;
+                  }
                   hasTimestampAction = true;
                   const btn = document.createElement('button');
                   btn.type = 'button';
                   btn.className = 'btn-seek';
                   btn.setAttribute('role', 'button');
                   btn.setAttribute('tabindex', '0');
-                  const tStr = Number(tKnee).toFixed(2);
+                  const tStr = tKneeNum.toFixed(2);
                   const attNum = att.attempt_id != null ? String(att.attempt_id) : '';
                   btn.textContent = 'Seek turnaround (' + tStr + 's)';
                   btn.title = 'Seek video to turnaround candidate point';
@@ -1296,7 +1345,7 @@ INDEX_HTML = """<html lang="en">
                       e.preventDefault();
                       e.stopPropagation();
                     }
-                    seekVideoToTime(tKnee);
+                    seekVideoToTime(tKneeNum);
                   };
                   btn.addEventListener('click', doSeekKnee);
                   btn.addEventListener('keydown', doSeekKnee);
@@ -1314,13 +1363,17 @@ INDEX_HTML = """<html lang="en">
               if (phaseAtt.return_phase) {
                 const tRet = phaseAtt.return_phase.delta_start_time_s;
                 if (isValidTimestamp(tRet)) {
+                  let tRetNum = Number(tRet);
+                  if (activeVideoDuration !== null && tRetNum > activeVideoDuration) {
+                    tRetNum = activeVideoDuration;
+                  }
                   hasTimestampAction = true;
                   const btn = document.createElement('button');
                   btn.type = 'button';
                   btn.className = 'btn-seek';
                   btn.setAttribute('role', 'button');
                   btn.setAttribute('tabindex', '0');
-                  const tStr = Number(tRet).toFixed(2);
+                  const tStr = tRetNum.toFixed(2);
                   const attNum = att.attempt_id != null ? String(att.attempt_id) : '';
                   btn.textContent = 'Seek return (' + tStr + 's)';
                   btn.title = 'Seek video to return phase start';
@@ -1333,7 +1386,7 @@ INDEX_HTML = """<html lang="en">
                       e.preventDefault();
                       e.stopPropagation();
                     }
-                    seekVideoToTime(tRet);
+                    seekVideoToTime(tRetNum);
                   };
                   btn.addEventListener('click', doSeekRet);
                   btn.addEventListener('keydown', doSeekRet);
@@ -1548,7 +1601,8 @@ INDEX_HTML = """<html lang="en">
               obsContainer.style.marginTop = '4px';
               cue.observations.forEach(obs => {
                 const oDiv = document.createElement('div');
-                const conf = obs.confidence_level ? (' [' + obs.confidence_level + ']') : '';
+                const confidenceLabel = obs.confidence_level === 'observed' ? 'model estimate' : obs.confidence_level;
+                const conf = confidenceLabel ? (' [' + confidenceLabel + ']') : '';
                 oDiv.textContent = '• ' + (obs.message || obs.rule_id || '') + conf;
                 obsContainer.appendChild(oDiv);
               });
@@ -1579,7 +1633,7 @@ INDEX_HTML = """<html lang="en">
           const noUncounted = document.createElement('div');
           noUncounted.style.fontSize = '0.82rem';
           noUncounted.style.color = 'var(--text-muted)';
-          noUncounted.textContent = 'No uncounted movements detected.';
+          noUncounted.textContent = 'No unconfirmed movement segments logged.';
           coachingUncountedList.appendChild(noUncounted);
         } else {
           uncounted.forEach(item => {
@@ -1605,10 +1659,10 @@ INDEX_HTML = """<html lang="en">
               hyp.style.marginTop = '2px';
               const hypMap = {
                 'possible_setup_or_weight_return': 'Possible setup or weight return (non-repetition motion)',
-                'shallow_depth': 'Shallow depth (inflection remained above configured threshold)',
+                'shallow_depth': 'Depth-threshold hypothesis (a separate attempt is not established)',
                 'tracking_lost': 'Tracking lost (confidence drop, occlusion, or tracking gap)',
                 'unfinished_cycle': 'Unfinished cycle (repetition in progress or video ended early)',
-                'ambiguous': 'Ambiguous context (multiple subjects or conflicting signals)',
+                'ambiguous': 'Unconfirmed context (may belong to a nearby squat or other movement)',
                 'unknown': 'Unknown context (unclassified movement event)'
               };
               const hypLabel = hypMap[item.context_hypothesis] || item.context_hypothesis.replace(/_/g, ' ');
@@ -1646,6 +1700,8 @@ INDEX_HTML = """<html lang="en">
         } catch (_) { outerGlobal.currentJobId = currentJobId; }
         outerGlobal.getCurrentJobId = () => currentJobId;
         outerGlobal.setCurrentJobId = (val) => { currentJobId = val; };
+        outerGlobal.getActiveVideoDuration = () => activeVideoDuration;
+        outerGlobal.setActiveVideoDuration = (val) => { activeVideoDuration = val; };
         outerGlobal.renderResults = renderResults;
         outerGlobal.displayResults = displayResults;
         outerGlobal.renderCoachingFeedback = renderCoachingFeedback;
@@ -1683,6 +1739,8 @@ INDEX_HTML = """<html lang="en">
         renderCoachingFeedback,
         getCurrentJobId: () => currentJobId,
         setCurrentJobId: (id) => { currentJobId = id; },
+        getActiveVideoDuration: () => activeVideoDuration,
+        setActiveVideoDuration: (val) => { activeVideoDuration = val; },
       };
     }
   </script>
@@ -1781,10 +1839,24 @@ def create_app(
                 detail="Server is busy: an analysis job is currently active. One analysis at a time.",
             )
 
+        raw_filename = (file.filename or "").strip()
+        if not raw_filename or not Path(raw_filename).suffix:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Uploaded file must have a valid video filename with an allowed extension.",
+            )
+
+        suffix = Path(raw_filename).suffix.lower()
+        if suffix not in ALLOWED_EXTENSIONS:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Unsupported video format '{suffix}'. Allowed formats: {', '.join(sorted(ALLOWED_EXTENSIONS))}",
+            )
+
         try:
             job_id, _target_path, total_bytes = job_manager.save_upload_file(
                 file_obj=file.file,
-                raw_filename=file.filename or "video.mp4",
+                raw_filename=raw_filename,
             )
         except ValueError as ve:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(ve))
@@ -1811,7 +1883,7 @@ def create_app(
             content={
                 "job_id": job_id,
                 "status": "queued",
-                "filename": file.filename or "video.mp4",
+                "filename": raw_filename,
                 "file_size_bytes": total_bytes,
             },
         )
@@ -1841,7 +1913,7 @@ def create_app(
                 detail="Invalid job ID format. Standard UUID4 required.",
             )
         try:
-            return job_manager.get_job_results(job_id)
+            results = job_manager.get_job_results(job_id)
         except KeyError:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -1852,6 +1924,32 @@ def create_app(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Failed to load job results: {exc}",
             )
+
+        # Compare counts without overwriting the summary or saved artifacts.
+        summary = results.get("summary")
+        attempts = results.get("attempts")
+        coaching = results.get("coaching_feedback")
+        counts = {}
+        def valid_count(value):
+            return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+        if isinstance(summary, dict) and valid_count(summary.get("completed_reps")):
+            counts["summary"] = summary["completed_reps"]
+        if isinstance(attempts, dict):
+            events = attempts.get("events")
+            if isinstance(events, list) and all(isinstance(e, dict) for e in events):
+                counts["attempt_events"] = sum(e.get("status") == "counted" for e in events)
+            elif valid_count(attempts.get("counter_completed_reps")):
+                counts["attempts"] = attempts["counter_completed_reps"]
+        if isinstance(coaching, dict):
+            overall = coaching.get("overall_summary")
+            if isinstance(overall, dict) and valid_count(overall.get("total_counted_reps")):
+                counts["coaching"] = overall["total_counted_reps"]
+        results["count_consistency"] = {
+            "status": "conflict" if len(set(counts.values())) > 1 else ("consistent" if len(counts) > 1 else "unavailable"),
+            "counts": counts,
+        }
+
+        return results
 
     @app.get("/api/jobs/{job_id}/download/{artifact_name}")
     async def download_artifact(job_id: str, artifact_name: str) -> FileResponse:
@@ -1875,11 +1973,14 @@ def create_app(
             artifact_path = job_manager.get_artifact_path(job_id, artifact_name)
             media_type = ALLOWED_ARTIFACTS.get(artifact_name, "application/octet-stream")
             disposition = "inline" if media_type.startswith(("video/", "image/")) else "attachment"
+            headers = {"Content-Disposition": f'{disposition}; filename="{artifact_name}"'}
+            if media_type.startswith("video/"):
+                headers["Accept-Ranges"] = "bytes"
             return FileResponse(
                 path=str(artifact_path),
                 media_type=media_type,
                 filename=artifact_name,
-                headers={"Content-Disposition": f'{disposition}; filename="{artifact_name}"'},
+                headers=headers,
             )
         except FileNotFoundError:
             raise HTTPException(

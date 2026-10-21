@@ -680,7 +680,7 @@ def build_feedback_observations(
 
         if uncounted_in_grp:
             grp_limits.append(
-                f"{len(uncounted_in_grp)} uncounted movement(s) on track {grp_tid} ({grp_side} side) "
+                f"{len(uncounted_in_grp)} unconfirmed segment(s) on track {grp_tid} ({grp_side} side) "
                 "excluded from cross-attempt consistency comparisons."
             )
 

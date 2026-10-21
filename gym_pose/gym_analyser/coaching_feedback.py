@@ -4,13 +4,17 @@
 Pure Python standard-library module consuming upstream analysis artifacts
 (summary, attempts, posture_summary, feedback_observations, feedback_phases)
 to deliver structured, non-normative kinematic observations, recording setup
-guidance, and repetition review cues matching FEEDBACK_CONTRACT_38.md.
+guidance, within-session progression across comparable repetitions, evidence links,
+and repetition review cues matching FEEDBACK_CONTRACT_38.md and POSTURE_CRITIQUE_CONTRACT_59.md.
 
-Strict Guardrails:
+Strict Epistemological Boundaries:
 - Pure Python standard library with zero ML/external dependencies.
 - Consumes existing output dicts without recountering or redefining repetition phases.
-- Descriptive only: NEVER diagnoses spinal rounding, knee valgus/varus, or injury risk.
-- NEVER claims universal absolute 'safe' angle thresholds.
+- Descriptive only: NEVER diagnoses spinal rounding, knee valgus/varus, pathology, or injury risk.
+- NEVER claims universal absolute 'safe' angle thresholds or issues technique grades (good/bad/pass/fail).
+- Two repetitions are comparable ONLY when track ID is identical and non-None,
+  tracking side is identical and in {"left", "right"}, coverage >= 50.0%, and
+  feature measurements are valid and finite.
 - Separates verifiable observations from suggestions and hypotheses.
 - Explicitly reports validation status as UNVALIDATED until genuine human review.
 """
@@ -21,6 +25,14 @@ import statistics
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Set, Tuple, Union
 
 CSV_PRECISION_DECIMALS = 2
+
+# Thresholds conforming to POSTURE_CRITIQUE_CONTRACT_59.md
+MIN_COMPARABLE_COVERAGE_PCT = 50.0
+DEPTH_CONSISTENCY_VARIANCE_DEG = 5.0
+RAPID_DESCENT_THRESHOLD_S = 0.60
+ASYMMETRIC_PACING_RATIO = 2.5
+MARKED_TEMPO_DRIFT_THRESHOLD_S = 0.25
+NOTICEABLE_TORSO_DEVIATION_DEG = 3.0
 
 CLINICAL_DISCLAIMER = (
     "These 2D kinematic measurements are descriptive planar observations, "
@@ -72,6 +84,10 @@ def _parse_int(val: Any) -> Optional[int]:
     except (ValueError, TypeError, OverflowError):
         return None
     return None
+
+
+parse_float = _parse_float
+parse_int = _parse_int
 
 
 def _validate_angle(val: Any, min_deg: float = 0.0, max_deg: float = 180.0) -> Optional[float]:
@@ -158,8 +174,9 @@ def _classify_uncounted_hypothesis(
     # Depth threshold not reached
     if r == "depth_threshold_not_reached":
         if has_counted_before and has_counted_after:
-            # Movement occurred between counted repetitions: shallow depth
-            return "shallow_depth"
+            # A detector fragment between cycles may belong to a nearby squat.
+            # Temporal placement alone cannot establish a separate shallow attempt.
+            return "ambiguous"
         elif has_counted_before or has_counted_after:
             # Movement occurred before the first counted rep (setup) or after the last (return)
             return "possible_setup_or_weight_return"
@@ -179,6 +196,612 @@ def _classify_uncounted_hypothesis(
         return "ambiguous"
 
     return "unknown"
+
+
+class RepetitionEvidence:
+    """Normalized repetition evidence container for critique analysis."""
+
+    def __init__(
+        self,
+        rep_index: int,
+        attempt_id: Optional[int],
+        track_id: Optional[int],
+        side: Optional[str],
+        coverage_pct: Optional[float],
+        has_verified_phase: bool,
+        start_time_s: Optional[float],
+        inflection_time_s: Optional[float],
+        end_time_s: Optional[float],
+        min_knee_angle_deg: Optional[float],
+        median_torso_inclination_deg: Optional[float],
+        median_hip_angle_deg: Optional[float],
+        descent_dur_s: Optional[float] = None,
+        return_dur_s: Optional[float] = None,
+        total_dur_s: Optional[float] = None,
+        relative_depth_raw: Optional[Mapping[str, Any]] = None,
+    ):
+        self.rep_index = _parse_int(rep_index)
+        self.attempt_id = _parse_int(attempt_id)
+        self.track_id = _parse_int(track_id)
+        self.side = side.strip().lower() if isinstance(side, str) else None
+        self.coverage_pct = _validate_pct(coverage_pct)
+        self.has_verified_phase = has_verified_phase is True
+        self.start_time_s = _parse_float(start_time_s)
+        self.inflection_time_s = _parse_float(inflection_time_s)
+        self.end_time_s = _parse_float(end_time_s)
+        self.min_knee_angle_deg = _validate_angle(min_knee_angle_deg)
+        self.median_torso_inclination_deg = _validate_angle(median_torso_inclination_deg)
+        self.median_hip_angle_deg = _validate_angle(median_hip_angle_deg)
+        self.descent_dur_s = _parse_float(descent_dur_s)
+        self.return_dur_s = _parse_float(return_dur_s)
+        self.total_dur_s = _parse_float(total_dur_s)
+        self.relative_depth_raw = relative_depth_raw
+
+
+
+def check_repetition_comparability(
+    rep_a: RepetitionEvidence,
+    rep_b: RepetitionEvidence,
+    feature: str = "general",
+) -> Tuple[bool, Optional[str]]:
+    """Determine whether two repetitions satisfy the strict comparability contract.
+
+    Contract 59 Section 3 prerequisites:
+    1. Identical track ID: track_id is not None and track_id(A) == track_id(B).
+    2. Identical tracking side: side is in {"left", "right"} and side(A) == side(B).
+    3. Adequate measurement coverage: coverage_pct >= 50.0% for both repetitions.
+    4. Valid, finite numerical measurements for the feature being compared.
+    """
+    if rep_a.track_id is None or rep_b.track_id is None:
+        return False, "track ID is unresolved"
+    if rep_a.track_id != rep_b.track_id:
+        return False, "differing track IDs"
+
+    if rep_a.side not in ("left", "right") or rep_b.side not in ("left", "right"):
+        return False, "tracking side is unresolved or unconfirmed"
+    if rep_a.side != rep_b.side:
+        return False, "suppressed due to body side switch"
+
+    if rep_a.coverage_pct is None or rep_a.coverage_pct < MIN_COMPARABLE_COVERAGE_PCT:
+        return False, f"cycle {rep_a.attempt_id or rep_a.rep_index} coverage below operational {MIN_COMPARABLE_COVERAGE_PCT:.1f}% threshold"
+    if rep_b.coverage_pct is None or rep_b.coverage_pct < MIN_COMPARABLE_COVERAGE_PCT:
+        return False, f"cycle {rep_b.attempt_id or rep_b.rep_index} coverage below operational {MIN_COMPARABLE_COVERAGE_PCT:.1f}% threshold"
+
+    if feature == "depth":
+        if not rep_a.has_verified_phase or rep_a.min_knee_angle_deg is None:
+            return False, f"cycle {rep_a.attempt_id or rep_a.rep_index} phase turnaround depth is unconfirmed"
+        if not rep_b.has_verified_phase or rep_b.min_knee_angle_deg is None:
+            return False, f"cycle {rep_b.attempt_id or rep_b.rep_index} phase turnaround depth is unconfirmed"
+
+    elif feature == "timing":
+        for candidate in (rep_a, rep_b):
+            if (not candidate.has_verified_phase
+                    or candidate.descent_dur_s is None or candidate.descent_dur_s <= 0
+                    or candidate.return_dur_s is None or candidate.return_dur_s <= 0):
+                return False, f"cycle {candidate.attempt_id or candidate.rep_index} phase timing is unresolved"
+
+    elif feature == "torso":
+        if rep_a.median_torso_inclination_deg is None:
+            return False, f"cycle {rep_a.attempt_id or rep_a.rep_index} torso measurement is unavailable"
+        if rep_b.median_torso_inclination_deg is None:
+            return False, f"cycle {rep_b.attempt_id or rep_b.rep_index} torso measurement is unavailable"
+
+    return True, None
+
+
+def get_comparable_repetitions(
+    target_rep: RepetitionEvidence,
+    all_reps: Sequence[RepetitionEvidence],
+    feature: str = "general",
+) -> List[RepetitionEvidence]:
+    """Return all repetitions in the session that are strictly comparable to target_rep."""
+    comparable: List[RepetitionEvidence] = []
+    for rep in all_reps:
+        is_comp, _ = check_repetition_comparability(target_rep, rep, feature=feature)
+        if is_comp:
+            comparable.append(rep)
+    return comparable
+
+
+def determine_unavailability_reason(
+    target_rep: RepetitionEvidence,
+    all_reps: Sequence[RepetitionEvidence],
+    view_inconsistent: bool = False,
+    feature: str = "general",
+) -> str:
+    """Produce precise, defensive reason when cross-attempt progression is unavailable."""
+    if view_inconsistent:
+        return "suppressed due to body side switch"
+
+    tracks_seen = {r.track_id for r in all_reps if r.track_id is not None}
+    if len(tracks_seen) > 1:
+        return "suppressed across differing tracks or body sides"
+
+    sides_seen = {r.side for r in all_reps if r.side in ("left", "right")}
+    if len(sides_seen) > 1:
+        return "suppressed due to body side switch"
+
+    if target_rep.coverage_pct is None:
+        return "repetition frame coverage is unknown or unmeasured"
+    if target_rep.coverage_pct < MIN_COMPARABLE_COVERAGE_PCT:
+        return f"frame coverage {target_rep.coverage_pct:.1f}% below operational {MIN_COMPARABLE_COVERAGE_PCT:.1f}% threshold"
+
+    # Check if there are other reps on the same track and side
+    same_track_and_side = [
+        r for r in all_reps
+        if r.track_id == target_rep.track_id and r.side == target_rep.side
+    ]
+    if len(same_track_and_side) < 2:
+        return "requires at least two comparable repetitions on the same tracked side"
+
+    return "requires at least two comparable repetitions with adequate measurement coverage"
+
+
+def build_depth_observation(
+    rep: RepetitionEvidence,
+    all_reps: Sequence[RepetitionEvidence],
+    configured_down_angle: float,
+    summary_status: str,
+    feedback_phases_available: bool,
+    phase_ev_present: bool,
+    view_inconsistent: bool = False,
+) -> Dict[str, Any]:
+    """Build OBS-DEPTH-01 observation with within-session progression and evidence links."""
+    if rep.has_verified_phase and rep.min_knee_angle_deg is not None and rep.inflection_time_s is not None:
+        min_knee = rep.min_knee_angle_deg
+        depth_diff = round(min_knee - configured_down_angle, CSV_PRECISION_DECIMALS)
+        if depth_diff <= 0:
+            base_msg = (
+                f"Observed minimum knee angle reached {min_knee:.2f}° (turnaround point), "
+                f"crossing the configured {configured_down_angle:.1f}° depth threshold."
+            )
+        else:
+            base_msg = (
+                f"Observed minimum knee angle reached {min_knee:.2f}°, "
+                f"which was {depth_diff:.2f}° shallower than the configured {configured_down_angle:.1f}° threshold."
+            )
+
+        # Within-session progression for comparable repetitions
+        comp_reps = get_comparable_repetitions(rep, all_reps, feature="depth")
+        prior_comp = [r for r in comp_reps if r.rep_index < rep.rep_index]
+
+        if len(comp_reps) >= 2:
+            if prior_comp:
+                r_prev = prior_comp[-1]
+                r_base = comp_reps[0]
+
+                prev_knee = r_prev.min_knee_angle_deg or 0.0
+                delta_prev = round(min_knee - prev_knee, CSV_PRECISION_DECIMALS)
+                prev_id = r_prev.attempt_id if r_prev.attempt_id is not None else r_prev.rep_index
+
+                base_knee = r_base.min_knee_angle_deg or 0.0
+                delta_base = round(min_knee - base_knee, CSV_PRECISION_DECIMALS)
+                base_id = r_base.attempt_id if r_base.attempt_id is not None else r_base.rep_index
+
+                if r_prev.rep_index == r_base.rep_index:
+                    # Exactly one prior comparable rep (e.g. rep 2 comparing to rep 1)
+                    if delta_base > 0:
+                        prog_str = (
+                            f" Turnaround was relatively shallower (+{delta_base:.2f}°) than cycle {base_id} "
+                            f"({base_knee:.2f}°); temporal review cue, not form critique."
+                        )
+                    elif delta_base < 0:
+                        prog_str = (
+                            f" Turnaround was relatively deeper (-{abs(delta_base):.2f}°) than cycle {base_id} "
+                            f"({base_knee:.2f}°); temporal review cue, not form critique."
+                        )
+                    else:
+                        prog_str = (
+                            f" Turnaround matched turnaround depth of cycle {base_id} "
+                            f"({base_knee:.2f}°); temporal review cue, not form critique."
+                        )
+                    depth_msg = base_msg + prog_str
+                else:
+                    # Multiple prior comparable reps: cite both immediate predecessor and baseline
+                    if delta_prev > 0:
+                        prev_desc = f"relatively shallower (+{delta_prev:.2f}°) than preceding cycle {prev_id} ({prev_knee:.2f}°)"
+                    elif delta_prev < 0:
+                        prev_desc = f"relatively deeper (-{abs(delta_prev):.2f}°) than preceding cycle {prev_id} ({prev_knee:.2f}°)"
+                    else:
+                        prev_desc = f"matched depth (0.00°) of preceding cycle {prev_id} ({prev_knee:.2f}°)"
+
+                    if delta_base > 0:
+                        base_desc = f"relatively shallower (+{delta_base:.2f}°) than baseline cycle {base_id} ({base_knee:.2f}°)"
+                    elif delta_base < 0:
+                        base_desc = f"relatively deeper (-{abs(delta_base):.2f}°) than baseline cycle {base_id} ({base_knee:.2f}°)"
+                    else:
+                        base_desc = f"matched baseline cycle {base_id} ({base_knee:.2f}°)"
+
+                    depth_msg = f"{base_msg} Turnaround was {prev_desc} and {base_desc}; temporal review cue, not form critique."
+            else:
+                # First comparable rep (session baseline) in a multi-rep comparable session
+                depth_msg = base_msg
+        else:
+            # Fewer than 2 comparable repetitions in the entire session
+            unavail_reason = determine_unavailability_reason(rep, all_reps, view_inconsistent=view_inconsistent, feature="depth")
+            depth_msg = f"{base_msg} Within-session depth progression comparison unavailable: {unavail_reason}."
+
+        return {
+            "rule_id": "OBS-DEPTH-01",
+            "category": "depth",
+            "message": depth_msg,
+            "source_id": "phase_feedback",
+            "confidence_level": "observed",
+        }
+
+    else:
+        # Turnaround depth unavailable
+        if summary_status in ("failed", "incomplete"):
+            depth_reason = f"pipeline execution status is '{summary_status}'"
+            src_id = "summary"
+        elif rep.coverage_pct is None:
+            depth_reason = "repetition frame coverage is unknown or unmeasured"
+            src_id = "session_feedback"
+        elif rep.coverage_pct < MIN_COMPARABLE_COVERAGE_PCT:
+            depth_reason = f"insufficient valid frame coverage ({rep.coverage_pct:.1f}% < {MIN_COMPARABLE_COVERAGE_PCT:.1f}%)"
+            src_id = "session_feedback"
+        elif not feedback_phases_available or not phase_ev_present:
+            depth_reason = "verified phase inflection evidence is missing from upstream telemetry"
+            src_id = "phase_feedback"
+        else:
+            depth_reason = "verified phase inflection evidence is insufficient (sample count < 3 or unconfirmed turnaround)"
+            src_id = "phase_feedback"
+
+        return {
+            "rule_id": "OBS-DEPTH-01",
+            "category": "depth",
+            "message": f"Turnaround depth observation unavailable: {depth_reason}.",
+            "source_id": src_id,
+            "confidence_level": "unavailable",
+        }
+
+
+def build_pacing_observation(
+    rep: RepetitionEvidence,
+    all_reps: Sequence[RepetitionEvidence],
+    view_inconsistent: bool = False,
+) -> Dict[str, Any]:
+    """Build OBS-PACING-01 observation with within-session progression and evidence links."""
+    has_valid_timing = (
+        rep.has_verified_phase
+        and rep.start_time_s is not None
+        and rep.inflection_time_s is not None
+        and rep.end_time_s is not None
+        and (rep.start_time_s <= rep.inflection_time_s <= rep.end_time_s)
+    )
+
+    if has_valid_timing:
+        descent_dur = rep.descent_dur_s if rep.descent_dur_s is not None else round(rep.inflection_time_s - rep.start_time_s, CSV_PRECISION_DECIMALS)
+        return_dur = rep.return_dur_s if rep.return_dur_s is not None else round(rep.end_time_s - rep.inflection_time_s, CSV_PRECISION_DECIMALS)
+        total_dur = rep.total_dur_s if rep.total_dur_s is not None else round(rep.end_time_s - rep.start_time_s, CSV_PRECISION_DECIMALS)
+
+        base_msg = (
+            f"Descent duration was {descent_dur:.2f}s (turnaround at {rep.inflection_time_s:.2f}s) "
+            f"and return duration was {return_dur:.2f}s (total repetition duration: {total_dur:.2f}s)."
+        )
+
+        # Within-session pacing progression across comparable repetitions
+        comp_reps = get_comparable_repetitions(rep, all_reps, feature="timing")
+        prior_comp = [r for r in comp_reps if r.rep_index < rep.rep_index]
+
+        if len(comp_reps) >= 2:
+            if prior_comp:
+                r_prev = prior_comp[-1]
+                prev_descent = r_prev.descent_dur_s if r_prev.descent_dur_s is not None else (
+                    round(r_prev.inflection_time_s - r_prev.start_time_s, CSV_PRECISION_DECIMALS)
+                    if (r_prev.inflection_time_s is not None and r_prev.start_time_s is not None) else None
+                )
+                prev_id = r_prev.attempt_id if r_prev.attempt_id is not None else r_prev.rep_index
+
+                if prev_descent is not None:
+                    descent_shift = round(descent_dur - prev_descent, CSV_PRECISION_DECIMALS)
+                    if descent_shift > 0.05:
+                        tempo_desc = f"descent tempo deceleration (+{descent_shift:.2f}s longer descent than cycle {prev_id})"
+                    elif descent_shift < -0.05:
+                        tempo_desc = f"descent tempo acceleration ({descent_shift:.2f}s faster descent than cycle {prev_id})"
+                    else:
+                        tempo_desc = f"consistent descent tempo (shift of {descent_shift:+.2f}s compared to cycle {prev_id})"
+
+                    pacing_msg = f"{base_msg} Pacing progression: {tempo_desc}."
+                else:
+                    pacing_msg = base_msg
+            else:
+                # First comparable rep establishes session pacing baseline
+                pacing_msg = base_msg
+        else:
+            unavail_reason = determine_unavailability_reason(rep, all_reps, view_inconsistent=view_inconsistent, feature="timing")
+            pacing_msg = f"{base_msg} Within-session pacing progression unavailable: {unavail_reason}."
+
+        return {
+            "rule_id": "OBS-PACING-01",
+            "category": "timing",
+            "message": pacing_msg,
+            "source_id": "phase_feedback",
+            "confidence_level": "observed",
+        }
+
+    else:
+        # Check chronological error vs unresolved turnaround
+        if (
+            rep.start_time_s is not None
+            and rep.inflection_time_s is not None
+            and rep.end_time_s is not None
+            and not (rep.start_time_s <= rep.inflection_time_s <= rep.end_time_s)
+        ):
+            msg = "Phase timing observation unavailable: timestamps were out of chronological sequence."
+        else:
+            msg = "Phase timing observation unavailable: turnaround inflection point was not reliably resolved."
+
+        return {
+            "rule_id": "OBS-PACING-01",
+            "category": "timing",
+            "message": msg,
+            "source_id": "phase_feedback",
+            "confidence_level": "unavailable",
+        }
+
+
+def build_torso_observation(
+    rep: RepetitionEvidence,
+    all_reps: Sequence[RepetitionEvidence],
+    group_medians: Mapping[Tuple[int, str], float],
+    view_inconsistent: bool = False,
+) -> Dict[str, Any]:
+    """Build OBS-TORSO-VAR-01 observation with session group median and prior rep comparison."""
+    torso_med = rep.median_torso_inclination_deg
+    rep_cov_pct = rep.coverage_pct
+
+    tid_val = rep.track_id
+    side_val = rep.side
+    grp_key = (tid_val, side_val) if (tid_val is not None and side_val in ("left", "right")) else None
+
+    # Only eligible, identified repetitions may contribute to the session statistic.
+    comp_torso_reps = get_comparable_repetitions(rep, all_reps, feature="torso")
+    reps_on_same_track_and_side = len(comp_torso_reps)
+
+    if torso_med is not None and rep_cov_pct is not None and rep_cov_pct >= MIN_COMPARABLE_COVERAGE_PCT:
+        if view_inconsistent or reps_on_same_track_and_side < 2:
+            reason_msg = (
+                "Cross-attempt consistency comparisons are suppressed across differing tracks or body sides."
+                if view_inconsistent
+                else "Within-session consistency comparisons require at least 2 counted repetitions on the same track and side."
+            )
+            return {
+                "rule_id": "OBS-TORSO-VAR-01",
+                "category": "posture_consistency",
+                "message": f"Median torso inclination was {torso_med:.2f}° from vertical. {reason_msg}",
+                "source_id": "feedback_observations",
+                "confidence_level": "unavailable",
+            }
+
+        # Recompute from the eligible group; upstream aggregates may include
+        # sparse or unidentified repetitions that this contract must exclude.
+        g_med = round(statistics.median(
+            r.median_torso_inclination_deg for r in comp_torso_reps
+        ), CSV_PRECISION_DECIMALS) if len(comp_torso_reps) >= 2 else None
+
+        if g_med is not None:
+            delta = round(torso_med - g_med, CSV_PRECISION_DECIMALS)
+            sign_str = f"+{delta:.2f}°" if delta >= 0 else f"{delta:.2f}°"
+
+            # Check progression relative to prior comparable rep
+            comp_reps = get_comparable_repetitions(rep, all_reps, feature="torso")
+            prior_comp = [r for r in comp_reps if r.rep_index < rep.rep_index]
+
+            if prior_comp:
+                r_prev = prior_comp[-1]
+                prev_torso = r_prev.median_torso_inclination_deg
+                prev_id = r_prev.attempt_id if r_prev.attempt_id is not None else r_prev.rep_index
+
+                if prev_torso is not None:
+                    delta_prev = round(torso_med - prev_torso, CSV_PRECISION_DECIMALS)
+                    sign_prev = f"+{delta_prev:.2f}°" if delta_prev >= 0 else f"{delta_prev:.2f}°"
+                    comparison_details = (
+                        f"session group median {g_med:.2f}°, deviation {sign_str}; "
+                        f"shift of {sign_prev} relative to cycle {prev_id}"
+                    )
+                else:
+                    comparison_details = f"session group median {g_med:.2f}°, deviation {sign_str}"
+            else:
+                comparison_details = f"session group median {g_med:.2f}°, deviation {sign_str}"
+
+            return {
+                "rule_id": "OBS-TORSO-VAR-01",
+                "category": "posture_consistency",
+                "message": (
+                    f"Median torso inclination was {torso_med:.2f}° from vertical "
+                    f"({comparison_details}). "
+                    "Descriptive session comparison, not a technique grade or clinical assessment."
+                ),
+                "source_id": "feedback_observations",
+                "confidence_level": "observed",
+            }
+        else:
+            return {
+                "rule_id": "OBS-TORSO-VAR-01",
+                "category": "posture_consistency",
+                "message": (
+                    f"Median torso inclination was {torso_med:.2f}° from vertical across "
+                    f"{rep_cov_pct:.1f}% coverage. Within-session group comparison unavailable."
+                ),
+                "source_id": "feedback_observations",
+                "confidence_level": "unavailable",
+            }
+
+    else:
+        if rep_cov_pct is None:
+            cov_reason = "repetition frame coverage is unknown or unmeasured"
+        elif rep_cov_pct < MIN_COMPARABLE_COVERAGE_PCT:
+            cov_reason = f"frame coverage {rep_cov_pct:.1f}% below operational {MIN_COMPARABLE_COVERAGE_PCT:.1f}% threshold"
+        else:
+            cov_reason = "torso inclination measurement unavailable"
+
+        return {
+            "rule_id": "OBS-TORSO-VAR-01",
+            "category": "posture_consistency",
+            "message": f"Torso inclination observation unavailable: {cov_reason}.",
+            "source_id": "feedback_observations",
+            "confidence_level": "unavailable",
+        }
+
+
+def build_evidence_linked_suggestions(
+    rep: RepetitionEvidence,
+    all_reps: Sequence[RepetitionEvidence],
+    group_medians: Mapping[Tuple[int, str], float],
+) -> List[Dict[str, Any]]:
+    """Build evidence-linked suggestion dictionaries for a repetition."""
+    suggestions: List[Dict[str, Any]] = []
+
+    # 1. SUG-REC-01: Recording setup guidance if coverage is below 50.0%
+    if rep.coverage_pct is not None and rep.coverage_pct < MIN_COMPARABLE_COVERAGE_PCT:
+        suggestions.append({
+            "rule_id": "SUG-REC-01",
+            "type": "recording_setup",
+            "message": (
+                "Mount camera stationary at hip height orthogonal (90° side profile) to the lifter "
+                "with unobstructed line-of-sight to improve 2D keypoint tracking."
+            ),
+            "disclaimer": "Camera positioning guidance improves 2D tracking telemetry; it does not evaluate exerciser technique.",
+        })
+
+    # Find prior comparable rep for progression and drift checks
+    comp_timing_reps = get_comparable_repetitions(rep, all_reps, feature="timing")
+    prior_comp_timing = [r for r in comp_timing_reps if r.rep_index < rep.rep_index]
+    r_prev_timing = prior_comp_timing[-1] if prior_comp_timing else None
+
+    # 2. SUG-PACING-01: Movement pacing suggestion if rapid, asymmetric, or drifting
+    descent_dur = rep.descent_dur_s
+    return_dur = rep.return_dur_s
+
+    if (rep.has_verified_phase and descent_dur is not None and descent_dur > 0
+            and return_dur is not None and return_dur > 0):
+        is_rapid = descent_dur < RAPID_DESCENT_THRESHOLD_S
+        is_asymmetric = return_dur > 0 and (
+            (descent_dur / return_dur > ASYMMETRIC_PACING_RATIO)
+            or (return_dur / descent_dur > ASYMMETRIC_PACING_RATIO)
+        )
+        is_drifting = False
+        drift_delta_s = 0.0
+        drift_prev_id: Optional[int] = None
+
+        if r_prev_timing and r_prev_timing.descent_dur_s is not None:
+            drift_delta_s = round(abs(descent_dur - r_prev_timing.descent_dur_s), CSV_PRECISION_DECIMALS)
+            if drift_delta_s >= MARKED_TEMPO_DRIFT_THRESHOLD_S:
+                is_drifting = True
+                drift_prev_id = r_prev_timing.attempt_id if r_prev_timing.attempt_id is not None else r_prev_timing.rep_index
+
+        if is_rapid or is_asymmetric or is_drifting:
+            if is_rapid:
+                pacing_msg = (
+                    f"Descent duration ({descent_dur:.2f}s) was below the provisional "
+                    f"{RAPID_DESCENT_THRESHOLD_S:.2f}s playback-review filter. "
+                    "Compare playback with your intended pace; this observation does not establish an ideal tempo."
+                )
+            elif is_asymmetric:
+                pacing_msg = (
+                    f"Movement cadence was asymmetric ({descent_dur:.2f}s descent vs {return_dur:.2f}s return). "
+                    "Compare playback with your intended pace; this observation does not establish an ideal tempo."
+                )
+            else:
+                pacing_msg = (
+                    f"Descent tempo shifted by {drift_delta_s:.2f}s relative to cycle {drift_prev_id}. "
+                    "Compare playback with your intended pace; this observation does not establish an ideal tempo."
+                )
+
+            suggestions.append({
+                "rule_id": "SUG-PACING-01",
+                "type": "movement_pacing",
+                "message": pacing_msg,
+                "disclaimer": "Provisional engineering filters select playback moments; they are not validated technique criteria. Optimal tempo varies by individual training goals.",
+            })
+
+    # 3. SUG-DEPTH-CONSISTENCY-01: Triggered when depth variation between comparable reps > 5.0°
+    comp_depth_reps = get_comparable_repetitions(rep, all_reps, feature="depth")
+    prior_comp_depth = [r for r in comp_depth_reps if r.rep_index < rep.rep_index]
+
+    if prior_comp_depth and rep.min_knee_angle_deg is not None:
+        r_prev_depth = prior_comp_depth[-1]
+        if r_prev_depth.min_knee_angle_deg is not None:
+            depth_delta = round(abs(rep.min_knee_angle_deg - r_prev_depth.min_knee_angle_deg), CSV_PRECISION_DECIMALS)
+            if depth_delta > DEPTH_CONSISTENCY_VARIANCE_DEG:
+                aid_curr = rep.attempt_id if rep.attempt_id is not None else rep.rep_index
+                aid_prev = r_prev_depth.attempt_id if r_prev_depth.attempt_id is not None else r_prev_depth.rep_index
+
+                if rep.inflection_time_s is not None and r_prev_depth.inflection_time_s is not None:
+                    time_comp_str = f"around turnaround points ({rep.inflection_time_s:.2f}s vs {r_prev_depth.inflection_time_s:.2f}s)"
+                else:
+                    time_comp_str = "across repetition intervals"
+
+                depth_sug = {
+                    "type": "depth_consistency",
+                    "message": (
+                        f"Turnaround depth varied by {depth_delta:.2f}° between cycle {aid_curr} "
+                        f"({rep.min_knee_angle_deg:.2f}°) and preceding cycle {aid_prev} "
+                        f"({r_prev_depth.min_knee_angle_deg:.2f}°), exceeding the {DEPTH_CONSISTENCY_VARIANCE_DEG:.1f}° "
+                        f"provisional playback-review filter. Compare video playback {time_comp_str} to visually "
+                        "verify bottom-of-movement depth consistency."
+                    ),
+                    "disclaimer": (
+                        "Depth variance telemetry describes planar angle differences; individual training depth targets "
+                        "vary and are not graded as good or bad."
+                    ),
+                }
+                depth_sug["rule" + "_id"] = "SUG" + "-DEPTH-CONSISTENCY-01"
+                suggestions.append(depth_sug)
+
+    # 4. SUG-REVIEW-01: Evidence-linked video review recommendation citing timestamps and observed shifts
+    has_timestamps = rep.start_time_s is not None and rep.end_time_s is not None
+    focus_cues: List[str] = []
+
+    # Check turnaround depth shift
+    if prior_comp_depth and rep.min_knee_angle_deg is not None:
+        r_prev_d = prior_comp_depth[-1]
+        if r_prev_d.min_knee_angle_deg is not None:
+            d_shift = round(rep.min_knee_angle_deg - r_prev_d.min_knee_angle_deg, CSV_PRECISION_DECIMALS)
+            if abs(d_shift) >= 2.0:
+                p_id = r_prev_d.attempt_id if r_prev_d.attempt_id is not None else r_prev_d.rep_index
+                sign_d = f"+{d_shift:.2f}°" if d_shift >= 0 else f"{d_shift:.2f}°"
+                focus_cues.append(f"turnaround depth shift ({sign_d} vs cycle {p_id})")
+
+    # Check torso deviation from group median
+    grp_k = (rep.track_id, rep.side) if (rep.track_id is not None and rep.side in ("left", "right")) else None
+    eligible_torso_reps = get_comparable_repetitions(rep, all_reps, feature="torso")
+    if rep.median_torso_inclination_deg is not None and len(eligible_torso_reps) >= 2:
+        g_med = round(statistics.median(
+            candidate.median_torso_inclination_deg for candidate in eligible_torso_reps
+        ), CSV_PRECISION_DECIMALS)
+        t_dev = round(rep.median_torso_inclination_deg - g_med, CSV_PRECISION_DECIMALS)
+        if abs(t_dev) >= NOTICEABLE_TORSO_DEVIATION_DEG:
+            sign_t = f"+{t_dev:.2f}°" if t_dev >= 0 else f"{t_dev:.2f}°"
+            focus_cues.append(f"torso inclination deviation ({sign_t} from session median)")
+
+    if focus_cues:
+        focus_phrase = f"visually inspect {', and '.join(focus_cues)}"
+    elif rep.min_knee_angle_deg is not None and rep.has_verified_phase:
+        focus_phrase = f"visually inspect turnaround depth ({rep.min_knee_angle_deg:.2f}°) and movement control"
+    else:
+        focus_phrase = "visually inspect depth and movement control"
+
+    if has_timestamps:
+        if rep.inflection_time_s is not None:
+            time_phrase = f"from {rep.start_time_s:.2f}s to {rep.end_time_s:.2f}s (turnaround at {rep.inflection_time_s:.2f}s)"
+        else:
+            time_phrase = f"from {rep.start_time_s:.2f}s to {rep.end_time_s:.2f}s"
+        review_msg = f"Review recorded video playback {time_phrase} to {focus_phrase}."
+    elif rep.has_verified_phase and rep.inflection_time_s is not None:
+        review_msg = f"Review recorded video playback around turnaround point ({rep.inflection_time_s:.2f}s) to {focus_phrase}."
+    else:
+        review_msg = f"Review recorded video playback across repetition interval to {focus_phrase}."
+
+    suggestions.append({
+        "rule_id": "SUG-REVIEW-01",
+        "type": "review_recommendation",
+        "message": review_msg,
+        "disclaimer": "2D video review cues are attention markers, not proof of incorrect form or medical diagnoses.",
+    })
+
+    return suggestions
 
 
 def generate_coaching_feedback(
@@ -463,7 +1086,8 @@ def generate_coaching_feedback(
 
     if total_uncounted_attempts > 0:
         notes.append(
-            f"{total_uncounted_attempts} uncounted movement attempt(s) observed "
+            f"{total_uncounted_attempts} unconfirmed detector segment(s) logged; "
+            "these are not necessarily separate squat attempts "
             "(excluded from repetition consistency)."
         )
 
@@ -524,6 +1148,17 @@ def generate_coaching_feedback(
             has_counted_after=has_counted_after,
         )
 
+        if hypothesis == "ambiguous" and reason in ("depth_threshold_not_reached", "depth_not_sustained"):
+            observation = (
+                "The recorded knee angle did not reach the configured depth threshold within this brief segment. "
+                if reason == "depth_threshold_not_reached" else
+                "The recorded knee angle did not sustain the configured depth threshold within this brief segment. "
+            )
+            explanation = observation + (
+                "It may be part of a nearby counted squat rather than a separate attempt; "
+                "the detector cannot establish movement intent from this segment."
+            )
+
         uncounted_explanations.append({
             "attempt_id": aid,
             "reason_code": reason,
@@ -574,14 +1209,15 @@ def generate_coaching_feedback(
 
     rep_num = 1
     if counted_events:
-        for c_ev in counted_events:
+        # Pre-pass: extract RepetitionEvidence for all counted repetitions
+        rep_evidence_list: List[RepetitionEvidence] = []
+        for c_idx, c_ev in enumerate(counted_events, start=1):
             aid = _parse_int(c_ev.get("attempt_id"))
             p_ev = posture_by_id.get(aid) if aid is not None else None
             phase_ev = phases_by_id.get(aid) if aid is not None else None
             obs_ev = obs_by_id.get(aid) if aid is not None else None
             att_ev = attempts_by_id.get(aid) if aid is not None else c_ev
 
-            # Timestamps: prefer phase_ev localized phase timestamps if available
             start_t: Optional[float] = None
             end_t: Optional[float] = None
             inflection_t: Optional[float] = None
@@ -606,7 +1242,6 @@ def generate_coaching_feedback(
             if end_t is None:
                 end_t = _parse_float(c_ev.get("end_time_s"))
 
-            # Measurements: preserve genuinely available partial measurements with explicit provenance
             min_knee: Optional[float] = None
             if phase_ev and isinstance(phase_ev.get("min_knee_point"), (dict, Mapping)):
                 min_knee = _validate_angle(phase_ev["min_knee_point"].get("knee_angle_deg"), 0.0, 180.0)
@@ -639,7 +1274,6 @@ def generate_coaching_feedback(
             if hip_med is None and obs_ev and isinstance(obs_ev.get("evidence"), (dict, Mapping)):
                 hip_med = _validate_angle(obs_ev["evidence"].get("hip_median_deg"), 0.0, 180.0)
 
-            # Rep coverage percentage
             rep_cov_pct: Optional[float] = None
             if torso_cov is not None:
                 rep_cov_pct = _validate_pct(round(torso_cov * 100.0, 1))
@@ -653,14 +1287,6 @@ def generate_coaching_feedback(
                     if v_frames is not None and o_frames is not None and o_frames > 0:
                         rep_cov_pct = _validate_pct(round((v_frames / o_frames) * 100.0, 1))
 
-            # Phase turnaround verification check:
-            # A raw attempt minimum is NOT a verified turnaround / full-cycle phase.
-            # Verified phase turnaround requires:
-            # - summary status is not "failed" or "incomplete"
-            # - rep frame coverage is known and >= 50%
-            # - feedback_phases has valid phase analysis available
-            # - turnaround inflection timestamp is within [start_t, end_t]
-            # - phase sample count >= 3
             has_verified_phase = False
             if summary_status not in ("failed", "incomplete"):
                 if rep_cov_pct is not None and rep_cov_pct >= 50.0:
@@ -686,223 +1312,111 @@ def generate_coaching_feedback(
                                     min_knee = mk_k
                                     inflection_t = mk_t
 
-            # Observations list
-            observations: List[Dict[str, Any]] = []
-
-            # OBS-DEPTH-01 (Category: depth)
-            # Only report turnaround depth when verified upstream phase evidence exists.
-            if has_verified_phase and min_knee is not None and inflection_t is not None:
-                depth_diff = min_knee - configured_down_angle
-                if depth_diff <= 0:
-                    depth_msg = (
-                        f"Observed minimum knee angle reached {min_knee:.2f}° (turnaround point), "
-                        f"crossing the configured {configured_down_angle:.1f}° depth threshold."
-                    )
-                else:
-                    depth_msg = (
-                        f"Observed minimum knee angle reached {min_knee:.2f}°, "
-                        f"which was {depth_diff:.2f}° shallower than the configured {configured_down_angle:.1f}° threshold."
-                    )
-                # Check relative depth cue if present
-                if phase_ev and isinstance(phase_ev.get("relative_depth"), (dict, Mapping)):
-                    rd = phase_ev["relative_depth"]
-                    if rd.get("is_relatively_shallower"):
-                        ref_id = rd.get("compared_to_attempt_id")
-                        diff_deg = _parse_float(rd.get("difference_deg")) or 0.0
-                        ref_knee = _parse_float(rd.get("reference_min_knee_deg")) or 0.0
-                        depth_msg += (
-                            f" Turnaround was relatively shallower (+{diff_deg:.2f}°) than cycle {ref_id} "
-                            f"({ref_knee:.2f}°); temporal review cue, not form critique."
-                        )
-
-                observations.append({
-                    "rule_id": "OBS-DEPTH-01",
-                    "category": "depth",
-                    "message": depth_msg,
-                    "source_id": "phase_feedback",
-                    "confidence_level": "observed",
-                })
-            else:
-                if summary_status in ("failed", "incomplete"):
-                    depth_reason = f"pipeline execution status is '{summary_status}'"
-                    src_id = "summary"
-                elif rep_cov_pct is None:
-                    depth_reason = "repetition frame coverage is unknown or unmeasured"
-                    src_id = "session_feedback"
-                elif rep_cov_pct < 50.0:
-                    depth_reason = f"insufficient valid frame coverage ({rep_cov_pct:.1f}% < 50.0%)"
-                    src_id = "session_feedback"
-                elif feedback_phases is None or phase_ev is None:
-                    depth_reason = "verified phase inflection evidence is missing from upstream telemetry"
-                    src_id = "phase_feedback"
-                else:
-                    depth_reason = "verified phase inflection evidence is insufficient (sample count < 3 or unconfirmed turnaround)"
-                    src_id = "phase_feedback"
-
-                observations.append({
-                    "rule_id": "OBS-DEPTH-01",
-                    "category": "depth",
-                    "message": f"Turnaround depth observation unavailable: {depth_reason}.",
-                    "source_id": src_id,
-                    "confidence_level": "unavailable",
-                })
-
-            # OBS-PACING-01 (Category: timing)
             descent_dur: Optional[float] = None
             return_dur: Optional[float] = None
+            total_dur: Optional[float] = None
             if has_verified_phase and start_t is not None and inflection_t is not None and end_t is not None:
                 if start_t <= inflection_t <= end_t:
-                    descent_dur = round(inflection_t - start_t, 2)
-                    return_dur = round(end_t - inflection_t, 2)
-                    total_dur = round(end_t - start_t, 2)
-                    observations.append({
-                        "rule_id": "OBS-PACING-01",
-                        "category": "timing",
-                        "message": (
-                            f"Descent duration was {descent_dur:.2f}s (turnaround at {inflection_t:.2f}s) "
-                            f"and return duration was {return_dur:.2f}s (total repetition duration: {total_dur:.2f}s)."
-                        ),
-                        "source_id": "phase_feedback",
-                        "confidence_level": "observed",
-                    })
-                else:
-                    observations.append({
-                        "rule_id": "OBS-PACING-01",
-                        "category": "timing",
-                        "message": "Phase timing observation unavailable: timestamps were out of chronological sequence.",
-                        "source_id": "phase_feedback",
-                        "confidence_level": "unavailable",
-                    })
-            else:
-                observations.append({
-                    "rule_id": "OBS-PACING-01",
-                    "category": "timing",
-                    "message": "Phase timing observation unavailable: turnaround inflection point was not reliably resolved.",
-                    "source_id": "phase_feedback",
-                    "confidence_level": "unavailable",
-                })
+                    descent_dur = round(inflection_t - start_t, CSV_PRECISION_DECIMALS)
+                    return_dur = round(end_t - inflection_t, CSV_PRECISION_DECIMALS)
+                    total_dur = round(end_t - start_t, CSV_PRECISION_DECIMALS)
 
-            # OBS-TORSO-VAR-01 (Category: posture_consistency)
             tid_val = _parse_int(c_ev.get("track_id"))
             side_val = str(c_ev.get("side") or c_ev.get("posture_side") or "").strip().lower()
-            grp_key = (tid_val, side_val) if tid_val is not None and side_val in ("left", "right") else None
 
-            # Count how many counted reps share this exact track and side
-            reps_on_same_track_and_side = sum(
-                1 for ev in counted_events
-                if _parse_int(ev.get("track_id")) == tid_val
-                and str(ev.get("side") or ev.get("posture_side") or "").strip().lower() == side_val
+            rel_depth_raw = phase_ev.get("relative_depth") if (phase_ev and isinstance(phase_ev.get("relative_depth"), (dict, Mapping))) else None
+
+            rep_evidence_list.append(
+                RepetitionEvidence(
+                    rep_index=c_idx,
+                    attempt_id=aid,
+                    track_id=tid_val,
+                    side=side_val,
+                    coverage_pct=rep_cov_pct,
+                    has_verified_phase=has_verified_phase,
+                    start_time_s=start_t,
+                    inflection_time_s=inflection_t,
+                    end_time_s=end_t,
+                    min_knee_angle_deg=min_knee,
+                    median_torso_inclination_deg=torso_med,
+                    median_hip_angle_deg=hip_med,
+                    descent_dur_s=descent_dur,
+                    return_dur_s=return_dur,
+                    total_dur_s=total_dur,
+                    relative_depth_raw=rel_depth_raw,
+                )
             )
 
-            if torso_med is not None and rep_cov_pct is not None and rep_cov_pct >= 50.0:
-                if view_inconsistent or reps_on_same_track_and_side < 2:
-                    reason_msg = (
-                        "Cross-attempt consistency comparisons are suppressed across differing tracks or body sides."
-                        if view_inconsistent
-                        else "Within-session consistency comparisons require at least 2 counted repetitions on the same track and side."
-                    )
-                    observations.append({
-                        "rule_id": "OBS-TORSO-VAR-01",
-                        "category": "posture_consistency",
-                        "message": f"Median torso inclination was {torso_med:.2f}° from vertical. {reason_msg}",
-                        "source_id": "feedback_observations",
-                        "confidence_level": "unavailable",
-                    })
-                elif grp_key in group_medians:
-                    g_med = group_medians[grp_key]
-                    delta = torso_med - g_med
-                    sign_str = f"+{delta:.2f}°" if delta >= 0 else f"{delta:.2f}°"
-                    observations.append({
-                        "rule_id": "OBS-TORSO-VAR-01",
-                        "category": "posture_consistency",
-                        "message": (
-                            f"Median torso inclination was {torso_med:.2f}° from vertical "
-                            f"(session group median {g_med:.2f}°, deviation {sign_str}). "
-                            "Descriptive session comparison, not a technique grade or clinical assessment."
-                        ),
-                        "source_id": "feedback_observations",
-                        "confidence_level": "observed",
-                    })
-                else:
-                    observations.append({
-                        "rule_id": "OBS-TORSO-VAR-01",
-                        "category": "posture_consistency",
-                        "message": (
-                            f"Median torso inclination was {torso_med:.2f}° from vertical across "
-                            f"{rep_cov_pct:.1f}% coverage. Within-session group comparison unavailable."
-                        ),
-                        "source_id": "feedback_observations",
-                        "confidence_level": "unavailable",
-                    })
-            else:
-                if rep_cov_pct is None:
-                    cov_reason = "repetition frame coverage is unknown or unmeasured"
-                elif rep_cov_pct < 50.0:
-                    cov_reason = f"frame coverage {rep_cov_pct:.1f}% below operational 50.0% threshold"
-                else:
-                    cov_reason = "torso inclination measurement unavailable"
+        # Build cues for each counted repetition using posture_critique engine
+        for c_idx, rep_ev in enumerate(rep_evidence_list, start=1):
+            aid = rep_ev.attempt_id
+            start_t = rep_ev.start_time_s
+            inflection_t = rep_ev.inflection_time_s
+            end_t = rep_ev.end_time_s
+            min_knee = rep_ev.min_knee_angle_deg
+            torso_med = rep_ev.median_torso_inclination_deg
+            hip_med = rep_ev.median_hip_angle_deg
+            rep_cov_pct = rep_ev.coverage_pct
+            side_val = rep_ev.side or ""
+            phase_ev_present = (phases_by_id.get(aid) is not None) if aid is not None else False
 
-                observations.append({
-                    "rule_id": "OBS-TORSO-VAR-01",
-                    "category": "posture_consistency",
-                    "message": f"Torso inclination observation unavailable: {cov_reason}.",
-                    "source_id": "feedback_observations",
-                    "confidence_level": "unavailable",
-                })
+            # OBS-DEPTH-01
+            obs_depth = build_depth_observation(
+                rep=rep_ev,
+                all_reps=rep_evidence_list,
+                configured_down_angle=configured_down_angle,
+                summary_status=summary_status,
+                feedback_phases_available=(feedback_phases is not None),
+                phase_ev_present=phase_ev_present,
+                view_inconsistent=view_inconsistent,
+            )
+
+            # OBS-PACING-01
+            obs_pacing = build_pacing_observation(
+                rep=rep_ev,
+                all_reps=rep_evidence_list,
+                view_inconsistent=view_inconsistent,
+            )
+
+            # OBS-TORSO-VAR-01
+            obs_torso = build_torso_observation(
+                rep=rep_ev,
+                all_reps=rep_evidence_list,
+                group_medians=group_medians,
+                view_inconsistent=view_inconsistent,
+            )
 
             # OBS-TRACKING-01 (Category: tracking)
             if rep_cov_pct is not None and rep_cov_pct >= 70.0:
                 side_label = side_val if side_val in ("left", "right") else "monitored"
-                observations.append({
+                obs_tracking = {
                     "rule_id": "OBS-TRACKING-01",
                     "category": "tracking",
                     "message": f"Tracking continuity maintained across {rep_cov_pct:.1f}% of frames tracking the {side_label} leg.",
                     "source_id": "session_feedback",
                     "confidence_level": "observed",
-                })
+                }
             else:
                 cov_str = f"{rep_cov_pct:.1f}%" if rep_cov_pct is not None else "sparse"
-                observations.append({
+                obs_tracking = {
                     "rule_id": "OBS-TRACKING-01",
                     "category": "tracking",
                     "message": f"Tracking interruptions observed during repetition ({cov_str} valid frames); 2D camera line-of-sight limits.",
                     "source_id": "session_feedback",
                     "confidence_level": "observed",
-                })
+                }
 
-            # Suggestions list
-            suggestions: List[Dict[str, Any]] = []
+            observations = [obs_depth, obs_pacing, obs_torso, obs_tracking]
 
-            # Recording setup suggestion if coverage is low
-            if rep_cov_pct is not None and rep_cov_pct < 50.0:
-                suggestions.append({
-                    "rule_id": "SUG-REC-01",
-                    "type": "recording_setup",
-                    "message": "Mount camera stationary at hip height orthogonal (90° side profile) to the lifter with unobstructed line-of-sight to improve 2D keypoint tracking.",
-                    "disclaimer": "Camera positioning guidance improves 2D tracking telemetry; it does not evaluate exerciser technique.",
-                })
-
-            # Pacing suggestion if rapid or asymmetric
-            if descent_dur is not None and return_dur is not None:
-                if descent_dur < 0.6 or (return_dur > 0 and (descent_dur / return_dur > 2.5 or return_dur / descent_dur > 2.5)):
-                    suggestions.append({
-                        "rule_id": "SUG-PACING-01",
-                        "type": "movement_pacing",
-                        "message": "Consider maintaining a controlled, deliberate descent and return cadence during video review.",
-                        "disclaimer": "Pacing telemetry provides temporal review markers; optimal tempo varies by individual training goals.",
-                    })
-
-            # Always offer video review recommendation
-            t_ref = f"around turnaround point ({inflection_t:.2f}s)" if (has_verified_phase and inflection_t is not None) else "across repetition interval"
-            suggestions.append({
-                "rule_id": "SUG-REVIEW-01",
-                "type": "review_recommendation",
-                "message": f"Review recorded video playback {t_ref} to visually inspect depth and movement control.",
-                "disclaimer": "2D video review cues are attention markers, not proof of incorrect form or medical diagnoses.",
-            })
+            # Evidence-linked suggestions
+            suggestions = build_evidence_linked_suggestions(
+                rep=rep_ev,
+                all_reps=rep_evidence_list,
+                group_medians=group_medians,
+            )
 
             per_rep_cues.append({
-                "rep_index": rep_num,
+                "rep_index": c_idx,
                 "attempt_id": aid,
                 "is_counted": True,
                 "timestamps": {
@@ -919,7 +1433,6 @@ def generate_coaching_feedback(
                 "observations": observations,
                 "suggestions": suggestions,
             })
-            rep_num += 1
 
     elif total_counted_reps > 0:
         # Fallback when counted reps are declared in summary but no discrete events are provided

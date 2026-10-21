@@ -395,7 +395,7 @@ class TestWebAPI(unittest.TestCase):
         self.assertIn("text/html", res.headers.get("content-type", ""))
         self.assertIn("2D Gym Pose Analyser", res.text)
         self.assertIn("Recording Guidance", res.text)
-        self.assertIn("Uncounted Movements", res.text)
+        self.assertIn("Unconfirmed Segments", res.text)
 
     def test_get_server_status_idle(self) -> None:
         """Validate GET /api/status returns idle state when no job is running."""

@@ -10,7 +10,7 @@ An early academic prototype for analysing single-person, side-view squat videos 
 
 ## Status
 
-Work in progress. Total repetition counts match user-reported counts on two initial real clips; general accuracy and posture feedback have not been validated. The initial synthetic-video smoke test contained no person detections; it verifies output generation, not squat-counting accuracy. Reviewed regression tests cover side reselection, missing-confidence rejection, native float32 pose data, tracking gaps, and incomplete-video/error reporting. This prototype does not assess medical safety or provide validated form correction.
+Work in progress. In addition to two initial real clips, the original model matched raw-first human totals on four personal recordings (9,6,7,5; the frontal recording is a separate challenge). General accuracy and posture feedback have not been validated. A once-only frozen-baseline 100-image Penn test yielded pose mAP50 0.2966 and mAP50–95 0.0687; these are pose metrics, not form-correction accuracy. The initial synthetic-video smoke test contained no person detections; it verifies output generation, not squat-counting accuracy. Reviewed regression tests cover side reselection, missing-confidence rejection, native float32 pose data, tracking gaps, and incomplete-video/error reporting. This prototype does not assess medical safety or provide validated form correction.
 
 ## Initial real-video count checks
 
@@ -23,9 +23,9 @@ The pretrained baseline was compared with counts supplied by the human project o
 
 Both clip totals match. These are two exploratory examples, not an estimate of general accuracy, rep-event precision, keypoint accuracy, or posture correctness. No per-repetition timestamps were labeled. The kettlebell run retains an `incomplete` integrity status because container-reported frame totals differ; independent FFprobe and OpenCV decodes agree on the available frame count. Footage and generated results remain local and excluded from Git. These clips should remain outside training for future baseline comparisons.
 
-## Training roadmap
+## Training evidence and remaining validation
 
-The planned training stage is **fine-tuning YOLO pose on public exercise data**, starting from pretrained weights. The current implementation is the pretrained baseline; no exercise-specific fine-tuning has been completed yet.
+Actual YOLO/PyTorch fine-tuning comparisons have completed on a 724-image Penn Action subset and an expanded 1,224-image Penn/COCO rehearsal set. The original pretrained checkpoint remains active because alternatives regressed on personal-video counting or measurement coverage. These limited experiments do not establish general posture accuracy.
 
 1. Verify dataset access, usage terms, body-joint definitions, and sample annotations.
 2. Convert compatible labels to YOLO pose format without inventing missing joints; split by subject/source to reduce leakage.
@@ -54,3 +54,16 @@ Only application source, tests, dependency requirements, README files, and Git i
 ## Credits and licensing
 
 The inference engine uses [Ultralytics YOLO](https://github.com/ultralytics/ultralytics), which has its own licensing terms. The counting design references [Shalbulov/exercise_counter](https://github.com/Shalbulov/exercise_counter), with adaptations for observed standing, confidence checks, and tracking gaps. See the application README for credits and limitations. No blanket permissive license is asserted for the integrated project.
+
+
+## Local website and validation status
+
+From `gym_pose`, launch the existing local environments with:
+
+```powershell
+.\.venv_web\Scripts\python.exe -m gym_analyser.web --port 8000 --device 0
+```
+
+Open http://127.0.0.1:8000. The local server provides upload, job status, annotated-video playback/seek, graphs, JSON/CSV/video downloads and a separate raw human-review workspace at `/review/`. It uses the local original checkpoint and a compatible inference environment; use `--device cpu` when CUDA is unavailable. See the application README for setup.
+
+Current engineering checks: 866 tests passed with 3 skips in the full existing-dependency run; 167 relevant tests passed after the final fragment-wording changes. Real local upload/download and desktop/mobile rendering/video-seek checks passed. These results do not establish clinical or general posture accuracy. Feedback observations are model estimates, and unconfirmed fragments are not automatically separate failed repetitions. Higher inference resolution and alternative checkpoints remain experimental rather than default replacements.

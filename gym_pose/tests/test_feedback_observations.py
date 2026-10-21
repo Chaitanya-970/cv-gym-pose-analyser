@@ -205,7 +205,7 @@ class TestFeedbackObservations(unittest.TestCase):
         self.assertEqual(depth_cmp["spread_deg"], 4.00)
 
         # Limitation clearly notes the excluded uncounted attempt
-        self.assertIn("1 uncounted movement(s) on track 1 (right side) excluded", " ".join(cmp_group["limitations"]))
+        self.assertIn("1 unconfirmed segment(s) on track 1 (right side) excluded", " ".join(cmp_group["limitations"]))
 
     def test_unknown_side_never_becomes_comparison_group(self):
         """Attempts with unknown or unselected side are never grouped for cross-attempt comparisons."""

@@ -292,3 +292,18 @@ Audit saved analysis JSON/CSV consistency without running inference:
 ```
 
 The report distinguishes failed/incomplete runs, contradictory counts/references and unavailable checks. Consumed JSON/CSV files are hashed; other media is checked by file metadata, not fully decoded or byte-verified. Reports require fresh destinations outside input storage. Internal consistency does not establish counting accuracy, movement intent or useful posture feedback.
+
+
+## Measurement and test interpretation
+
+Per-repetition observations are labelled **model estimate**. Projected angles and software thresholds do not establish universal good/bad technique, and numerical precision is not anatomical accuracy. Count matches on a few videos do not validate every event boundary or posture cue. The current original model remains selected; alternative fine-tuning/resolution trials did not justify replacing it. The once-used 100-image baseline pose test is consumed evidence and must not become tuning feedback.
+
+For full test discovery on this project's existing separate environments, run from this directory:
+
+```powershell
+$env:PYTHONPATH = (Resolve-Path .\.venv_web\Lib\site-packages).Path
+.\.venv_cuda\Scripts\python.exe -m unittest discover -s tests -v
+Remove-Item Env:PYTHONPATH
+```
+
+This combines existing optional-web and ML dependencies for testing without installations. A single environment with both requirements files installed can run discovery directly. The web-only environment cannot run ML-dependent tests. GPU-specific setup varies by platform; model/data/media remain local and excluded from Git.

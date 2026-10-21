@@ -165,7 +165,7 @@ class TestAccessibilityAndMarkup(unittest.TestCase):
         """Maintain honest clinical non-diagnostic disclaimers and raw-review-first guidance."""
         self.assertIn("2D Gym Pose Analyser", INDEX_HTML)
         self.assertIn("Recording Guidance", INDEX_HTML)
-        self.assertIn("Uncounted Movements", INDEX_HTML)
+        self.assertIn("Unconfirmed Segments", INDEX_HTML)
         self.assertIn("Human Review Workspace", INDEX_HTML)
         self.assertIn("projected 2D coordinates", INDEX_HTML)
         self.assertIn("do not constitute clinical safety evaluations", INDEX_HTML)

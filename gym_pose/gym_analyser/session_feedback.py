@@ -425,7 +425,7 @@ def summarise_attempt_posture(
 
         side_name = target_side if target_side else "unspecified side"
         obs.append(
-            f"Kinematic observations reflect projected 2D measurements from the observed {side_name} lateral view; "
+            f"Kinematic observations reflect projected 2D measurements from tracked {side_name} joints; this does not establish camera orientation; "
             "individual morphology, camera roll, and stance geometry influence projected angles without indicating movement quality."
         )
 
