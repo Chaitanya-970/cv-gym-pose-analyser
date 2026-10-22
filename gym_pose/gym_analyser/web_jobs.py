@@ -31,6 +31,7 @@ DEFAULT_MAX_UPLOAD_BYTES: int = 200 * 1024 * 1024
 # Exact allowlist of downloadable job artifacts and their media types
 ALLOWED_ARTIFACTS: Dict[str, str] = {
     "heel_review.json": "application/json",
+    "knee_review.json": "application/json",
     "summary.json": "application/json",
     "attempts.json": "application/json",
     "posture_summary.json": "application/json",

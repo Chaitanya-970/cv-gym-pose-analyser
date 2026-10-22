@@ -9,7 +9,16 @@ from .auxiliary_pose import MediaPipeLandmarker
 from .heel_lift import assess_heel_lift
 
 
-def analyse_video(input_path, model_path, request, *, time_limit=170.):
+def reference_timestamps(frames,start_s,end_s,fps):
+    """Allow half a decoded frame for rounded human-entered reference times."""
+    if not math.isfinite(fps) or fps<=0:raise ValueError('Positive finite frame rate required')
+    tolerance_ms=500/fps
+    return [f['timestamp_ms'] for f in frames
+            if start_s*1000-tolerance_ms<=f['timestamp_ms']<=end_s*1000+tolerance_ms]
+
+
+def analyse_video(input_path, model_path, request, *, time_limit=170., assessment_kind="heel"):
+    if assessment_kind not in ["heel","knee"]:raise ValueError("Unsupported assessment")
     import cv2
     start=time.monotonic()
     digest=hashlib.sha256()
@@ -35,8 +44,18 @@ def analyse_video(input_path, model_path, request, *, time_limit=170.):
                     result['frame_index']=index;frames.append(result)
     finally:cap.release()
     if not frames:raise ValueError('No decoded video frames')
-    refs=[f['timestamp_ms'] for f in frames
-          if request['reference_start_s']*1000-.5<=f['timestamp_ms']<=request['reference_end_s']*1000+.5]
+    refs=reference_timestamps(frames,request['reference_start_s'],request['reference_end_s'],fps)
+    if assessment_kind=='knee':
+        from .knee_tracking import assess_knee_tracking
+        calibration=dict(source_sha256=digest.hexdigest(),reference_timestamps_ms=refs,
+            front_view=request['front_view'],stationary_camera=request['stationary_camera'],
+            standing_reference_confirmed=request['standing_still'],human_evidence_id=request['review_id'])
+        selected=assess_knee_tracking(frames,source_sha256=digest.hexdigest(),calibration=calibration)
+        selected.update(review_id=request['review_id'],tracking=dict(decoded_frames=decoded,sampled_frames=len(frames),sampling_step=step,fps=fps),
+            elapsed_s=time.monotonic()-start,limitations=['Projected inward-knee review flags are not a diagnosis of anatomical valgus or safe/unsafe form.',
+            'Accuracy unvalidated. Missing tracking and out-of-plane movement cannot establish absence.',
+            'Heel lift and back rounding are not assessed by this knee review.'])
+        return selected
     calibration=dict(source_sha256=digest.hexdigest(),reference_timestamps_ms=refs,
         suitable_side_view=request['side_view'],stationary_camera=request['stationary_camera'],
         planted_reference_confirmed=request['heels_flat'],human_evidence_id=request['review_id'])

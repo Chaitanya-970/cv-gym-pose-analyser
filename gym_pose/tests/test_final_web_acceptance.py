@@ -796,8 +796,9 @@ class TestRealSavedPersonalVideoArtifacts(unittest.TestCase):
         # Historical base artifacts exist; optional heel review was not run.
         self.assertEqual(set(data["available_artifacts"]), set(ALLOWED_ARTIFACTS))
         self.assertFalse(data["available_artifacts"]["heel_review.json"]["available"])
+        self.assertFalse(data["available_artifacts"]["knee_review.json"]["available"])
         for name, art_info in data["available_artifacts"].items():
-            if name == "heel_review.json":
+            if name in {"heel_review.json", "knee_review.json"}:
                 self.assertEqual(art_info["size_bytes"], 0)
                 continue
             self.assertTrue(art_info["available"], f"Artifact {name} must be available on disk")
