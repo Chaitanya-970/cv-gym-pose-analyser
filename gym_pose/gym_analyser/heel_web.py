@@ -33,6 +33,15 @@ def validate_knee_request(body):
     return _validate_reference(body,'front_view','standing_still')
 
 
+
+def validate_back_request(body):
+    extra={'facing','same_facing_direction'}
+    if not isinstance(body,dict) or not extra.issubset(body):raise ValueError('Supply facing direction and confirm no turning')
+    if body['facing'] not in ('left','right') or body['same_facing_direction'] is not True:raise ValueError('Choose left or right facing and confirm no turning')
+    _validate_reference({k:v for k,v in body.items() if k not in extra},'side_view','standing_still')
+    return dict(body)
+
+
 def _child(parent,name):
     path=parent/name
     if path.resolve().parent!=parent.resolve():raise ValueError('Review storage cannot redirect outside its job')
@@ -46,18 +55,23 @@ def _save(path,data):
 
 
 def run_optional_worker(*, input_path, model_path, calibration_path, output_path, log_path, gym_pose_dir, timeout, module="gym_analyser.heel_runner"):
-    if module not in ['gym_analyser.heel_runner','gym_analyser.knee_runner']:raise ValueError('Unsupported review worker')
+    if module not in ['gym_analyser.heel_runner','gym_analyser.knee_runner','gym_analyser.back_runner']:raise ValueError('Unsupported review worker')
     from .review_execution import _start_owned_child,kill_process_tree
-    root=Path(gym_pose_dir);special=root/'.venv_fault/Scripts/python.exe'
+    root=Path(gym_pose_dir);is_back=module=='gym_analyser.back_runner'
+    special=root/('.venv_spine/Scripts/python.exe' if is_back else '.venv_fault/Scripts/python.exe')
     interpreter=special if special.is_file() else Path(sys.executable)
     if not Path(model_path).is_file():raise RuntimeError('Optional local auxiliary model is unavailable')
     env=os.environ.copy();paths=[str(root)]
     if interpreter==special:
-        paths.extend(str(p) for p in [root/'.venv_fault/Lib/site-packages',root/'.venv_cuda/Lib/site-packages'] if p.is_dir())
+        paths.extend(str(p) for p in ([root/'.venv_spine/Lib/site-packages'] if is_back else [])+[root/'.venv_fault/Lib/site-packages',root/'.venv_cuda/Lib/site-packages'] if p.is_dir())
     env['PYTHONPATH']=os.pathsep.join(paths)
     command=[str(interpreter),'-m',module,'--input',str(input_path),
              '--model',str(model_path),'--calibration',str(calibration_path),'--output',str(output_path),
              '--time-limit',str(max(1.,timeout-5))]
+    if is_back:
+        spine_model=root/'models/spinepose-s-v2.onnx'
+        if not spine_model.is_file():raise RuntimeError('Optional local spine model is unavailable')
+        command.extend(['--spine-model',str(spine_model)])
     with Path(log_path).open('x',encoding='utf-8') as log:
         proc,job=_start_owned_child(command,log,{'cwd':str(root),'env':env})
         try:code=proc.wait(timeout=timeout)
@@ -68,9 +82,9 @@ def run_optional_worker(*, input_path, model_path, calibration_path, output_path
 
 class HeelReviewService:
     def __init__(self,manager,runner=None,*,kind='heel'):
-        if kind not in ['heel','knee']:raise ValueError('Unsupported review kind')
+        if kind not in ['heel','knee','back']:raise ValueError('Unsupported review kind')
         self.manager=manager;self.kind=kind
-        self.validator=validate_request if kind=='heel' else validate_knee_request
+        self.validator={'heel':validate_request,'knee':validate_knee_request,'back':validate_back_request}[kind]
         self.runner=runner or partial(run_optional_worker,module='gym_analyser.'+kind+'_runner')
         self.status_filename=kind+'_review_status.json'
         self.artifact_filename=kind+'_review.json'
@@ -94,7 +108,7 @@ class HeelReviewService:
         if not is_valid_job_id(job_id):raise ValueError('Invalid job ID')
         metadata=self.manager.get_metadata(job_id)
         if not metadata:raise KeyError('Unknown job')
-        if metadata.get('status') not in ['completed','incomplete']:raise ValueError('Finish the main video analysis before heel review')
+        if metadata.get('status') not in ['completed','incomplete']:raise ValueError('Finish the main video analysis before technique review')
         root=self.manager._get_job_dir(job_id);sources=list(_child(root,'input').glob('source.*'))
         if len(sources)!=1 or sources[0].resolve().parent!=root/'input':raise ValueError('Uploaded source is unavailable')
         with self.manager._lock:
