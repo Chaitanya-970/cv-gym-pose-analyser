@@ -33,6 +33,7 @@ ALLOWED_ARTIFACTS: Dict[str, str] = {
     "heel_review.json": "application/json",
     "knee_review.json": "application/json",
     "back_review.json": "application/json",
+    "teng_review.json": "application/json",
     "summary.json": "application/json",
     "attempts.json": "application/json",
     "posture_summary.json": "application/json",

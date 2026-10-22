@@ -1755,6 +1755,8 @@ from .knee_review_ui import add_knee_review_ui
 INDEX_HTML = add_knee_review_ui(INDEX_HTML)
 from .back_review_ui import add_back_review_ui
 INDEX_HTML = add_back_review_ui(INDEX_HTML)
+from .teng_review_ui import add_teng_review_ui
+INDEX_HTML = add_teng_review_ui(INDEX_HTML)
 
 
 def create_app(
@@ -1764,6 +1766,7 @@ def create_app(
     heel_review_runner: Optional[Any] = None,
     knee_review_runner: Optional[Any] = None,
     back_review_runner: Optional[Any] = None,
+    teng_review_runner: Optional[Any] = None,
     review_storage_root: Optional[Union[str, Path]] = None,
     review_max_upload_bytes: int = DEFAULT_MAX_UPLOAD_BYTES,
     **kwargs: Any,
@@ -1820,6 +1823,7 @@ def create_app(
     mount_heel_review(app, job_manager, heel_review_runner)
     mount_heel_review(app, job_manager, knee_review_runner, kind="knee")
     mount_heel_review(app, job_manager, back_review_runner, kind="back")
+    mount_heel_review(app, job_manager, teng_review_runner, kind="teng")
 
     @app.get("/", response_class=HTMLResponse)
     async def index() -> HTMLResponse:

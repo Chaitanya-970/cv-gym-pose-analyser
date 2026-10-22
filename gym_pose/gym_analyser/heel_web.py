@@ -34,6 +34,11 @@ def validate_knee_request(body):
 
 
 
+def validate_teng_request(body):
+    if not isinstance(body,dict) or set(body)!={'side_view','stationary_camera'} or any(v is not True for v in body.values()):raise ValueError('Confirm stationary side-view recording')
+    return dict(body)
+
+
 def validate_back_request(body):
     extra={'facing','same_facing_direction'}
     if not isinstance(body,dict) or not extra.issubset(body):raise ValueError('Supply facing direction and confirm no turning')
@@ -55,9 +60,9 @@ def _save(path,data):
 
 
 def run_optional_worker(*, input_path, model_path, calibration_path, output_path, log_path, gym_pose_dir, timeout, module="gym_analyser.heel_runner"):
-    if module not in ['gym_analyser.heel_runner','gym_analyser.knee_runner','gym_analyser.back_runner']:raise ValueError('Unsupported review worker')
+    if module not in ['gym_analyser.heel_runner','gym_analyser.knee_runner','gym_analyser.back_runner','gym_analyser.teng_runner']:raise ValueError('Unsupported review worker')
     from .review_execution import _start_owned_child,kill_process_tree
-    root=Path(gym_pose_dir);is_back=module=='gym_analyser.back_runner'
+    root=Path(gym_pose_dir);is_back=module in ['gym_analyser.back_runner','gym_analyser.teng_runner']
     special=root/('.venv_spine/Scripts/python.exe' if is_back else '.venv_fault/Scripts/python.exe')
     interpreter=special if special.is_file() else Path(sys.executable)
     if not Path(model_path).is_file():raise RuntimeError('Optional local auxiliary model is unavailable')
@@ -82,9 +87,9 @@ def run_optional_worker(*, input_path, model_path, calibration_path, output_path
 
 class HeelReviewService:
     def __init__(self,manager,runner=None,*,kind='heel'):
-        if kind not in ['heel','knee','back']:raise ValueError('Unsupported review kind')
+        if kind not in ['heel','knee','back','teng']:raise ValueError('Unsupported review kind')
         self.manager=manager;self.kind=kind
-        self.validator={'heel':validate_request,'knee':validate_knee_request,'back':validate_back_request}[kind]
+        self.validator={'heel':validate_request,'knee':validate_knee_request,'back':validate_back_request,'teng':validate_teng_request}[kind]
         self.runner=runner or partial(run_optional_worker,module='gym_analyser.'+kind+'_runner')
         self.status_filename=kind+'_review_status.json'
         self.artifact_filename=kind+'_review.json'
