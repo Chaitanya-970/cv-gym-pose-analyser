@@ -17,7 +17,7 @@ Task 63 Acceptance Suite:
    - Harmonization of completed_reps across summary, attempts, coaching_feedback.
    - Agreement on rep boundaries (timestamps and frame boundaries).
    - Accurate decoded-prefix reporting for incomplete runs.
-   - All 10 allowed artifacts available and downloadable.
+   - All allowed artifacts available and downloadable.
 4. Real saved personal-video artifacts:
    - Exercises local HTTP endpoints using actual saved artifacts from
      misc/user_video_review/a2857b52f2cd/execution_01/baseline/3fefbab9-65c6-4b3e-8822-09e31b009806/.
@@ -698,8 +698,8 @@ class TestWebResultsAndArtifactAgreement(unittest.TestCase):
         self.assertEqual(data["processed_frames"], 120)
         self.assertEqual(data["read_status_note"], note)
 
-    def test_all_10_allowed_artifacts_availability(self) -> None:
-        """All 10 allowed artifacts are listed in available_artifacts and individually downloadable."""
+    def test_all_allowed_artifacts_availability(self) -> None:
+        """All allowed artifacts are listed in available_artifacts and individually downloadable."""
         job_id = str(uuid.uuid4())
         job_dir = self.storage_dir / job_id
         results_dir = job_dir / "results"
@@ -724,7 +724,7 @@ class TestWebResultsAndArtifactAgreement(unittest.TestCase):
         res = client.get(f"/api/jobs/{job_id}/results")
         self.assertEqual(res.status_code, 200)
         artifacts = res.json()["available_artifacts"]
-        self.assertEqual(len(artifacts), 10)
+        self.assertEqual(set(artifacts), set(ALLOWED_ARTIFACTS))
 
         for name, expected_media in ALLOWED_ARTIFACTS.items():
             self.assertIn(name, artifacts)
@@ -793,9 +793,13 @@ class TestRealSavedPersonalVideoArtifacts(unittest.TestCase):
         self.assertEqual(len(data["coaching_feedback"]["per_repetition_cues"]), 9)
         self.assertEqual(data["coaching_feedback"]["overall_summary"]["total_counted_reps"], 9)
 
-        # Verify all 10 artifacts are confirmed available
-        self.assertEqual(len(data["available_artifacts"]), 10)
+        # Historical base artifacts exist; optional heel review was not run.
+        self.assertEqual(set(data["available_artifacts"]), set(ALLOWED_ARTIFACTS))
+        self.assertFalse(data["available_artifacts"]["heel_review.json"]["available"])
         for name, art_info in data["available_artifacts"].items():
+            if name == "heel_review.json":
+                self.assertEqual(art_info["size_bytes"], 0)
+                continue
             self.assertTrue(art_info["available"], f"Artifact {name} must be available on disk")
             self.assertGreater(art_info["size_bytes"], 0)
 

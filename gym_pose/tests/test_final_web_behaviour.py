@@ -219,6 +219,7 @@ def _populate_mock_job_results(job_dir: Path, status: str = "completed", complet
         json.dump({"summary": {"session_observations": ["Decoded cycle sequence observed."]}, "attempts": []}, f)
     with open(results_dir / "feedback_phases.json", "w", encoding="utf-8") as f:
         json.dump({"summary": {}, "attempts": []}, f)
+    (results_dir / "heel_review.json").write_text(json.dumps({"status": "unable_to_assess", "accuracy": "not_validated"}), encoding="utf-8")
     with open(results_dir / "coaching_feedback.json", "w", encoding="utf-8") as f:
         json.dump(coaching, f)
     with open(results_dir / "angles.csv", "w", encoding="utf-8") as f:

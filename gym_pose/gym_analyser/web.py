@@ -1749,10 +1749,15 @@ INDEX_HTML = """<html lang="en">
 """
 
 
+from .heel_review_ui import add_heel_review_ui
+INDEX_HTML = add_heel_review_ui(INDEX_HTML)
+
+
 def create_app(
     job_manager: Optional[JobManager] = None,
     *,
     enable_review: bool = True,
+    heel_review_runner: Optional[Any] = None,
     review_storage_root: Optional[Union[str, Path]] = None,
     review_max_upload_bytes: int = DEFAULT_MAX_UPLOAD_BYTES,
     **kwargs: Any,
@@ -1804,6 +1809,9 @@ def create_app(
             storage_root=review_root_path,
             max_upload_bytes=review_max_upload_bytes,
         ))
+
+    from .heel_web import mount_heel_review
+    mount_heel_review(app, job_manager, heel_review_runner)
 
     @app.get("/", response_class=HTMLResponse)
     async def index() -> HTMLResponse:
