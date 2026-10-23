@@ -1757,6 +1757,8 @@ from .back_review_ui import add_back_review_ui
 INDEX_HTML = add_back_review_ui(INDEX_HTML)
 from .teng_review_ui import add_teng_review_ui
 INDEX_HTML = add_teng_review_ui(INDEX_HTML)
+from .web_theme import apply_simple_theme
+INDEX_HTML = apply_simple_theme(INDEX_HTML)
 
 
 def create_app(
@@ -1831,7 +1833,7 @@ def create_app(
         html = INDEX_HTML
         if not enable_review:
             import re
-            html = re.sub(r'<nav class="review-nav".*?</nav>', "", html, count=1, flags=re.DOTALL)
+            html = re.sub(r'<nav[^>]*class="review-nav".*?</nav>', "", html, count=1, flags=re.DOTALL)
             html = re.sub(r'<div><strong>Human Review:</strong>.*?</div>', "", html, count=1, flags=re.DOTALL)
         return HTMLResponse(content=html, status_code=200)
 

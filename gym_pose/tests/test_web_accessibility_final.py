@@ -463,8 +463,9 @@ class TestVisibleFocusIndicators(unittest.TestCase):
             self.assertIn(selector, INDEX_HTML, f"Missing explicit focus-visible selector: {selector}")
 
     def test_focus_visible_box_shadow_contrast_enhancement(self) -> None:
-        """Focus-visible includes focus ring / box-shadow for contrast against dark backgrounds."""
-        self.assertIn("box-shadow: 0 0 0 4px rgba(56, 189, 248, 0.35)", INDEX_HTML)
+        """Light theme keeps a visible solid focus ring without a neon glow."""
+        self.assertIn("outline: 3px solid var(--primary)", INDEX_HTML)
+        self.assertIn("outline-offset: 3px", INDEX_HTML)
 
 
 class TestScreenResponsivenessAndOverflowSafety(unittest.TestCase):
@@ -590,9 +591,8 @@ class TestMissingAndIncompleteFeedbackStates(_NodeHarnessBase):
         self.assertRegex(INDEX_HTML, r"\.status-incomplete\s*\{[^}]*color:\s*#000")
         self.assertRegex(INDEX_HTML, r"\.status-incomplete\s*\{[^}]*font-weight:\s*700")
 
-        # Unavailable has high-contrast white text on slate
-        self.assertRegex(INDEX_HTML, r"\.status-unavailable\s*\{[^}]*background:\s*#475569")
-        self.assertRegex(INDEX_HTML, r"\.status-unavailable\s*\{[^}]*color:\s*#f8fafc")
+        # Unavailable remains a distinguishable neutral light-theme state.
+        self.assertIn(".status-unavailable, .status-unvalidated { background: #edf0eb; color: #4b594e", INDEX_HTML)
 
     def test_unavailable_coaching_badge_and_assistive_text(self) -> None:
         """renderCoachingFeedback(null) assigns .status-unavailable and descriptive aria-label."""
