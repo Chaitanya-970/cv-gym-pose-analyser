@@ -30,6 +30,7 @@ DEFAULT_MAX_UPLOAD_BYTES: int = 200 * 1024 * 1024
 
 # Exact allowlist of downloadable job artifacts and their media types
 ALLOWED_ARTIFACTS: Dict[str, str] = {
+    "counting_check.json": "application/json",
     "heel_review.json": "application/json",
     "knee_review.json": "application/json",
     "back_review.json": "application/json",
@@ -195,12 +196,16 @@ class JobManager:
         self,
         file_obj: Any,
         raw_filename: str,
+        counting_mode: str = "standard",
     ) -> Tuple[str, Path, int]:
         """Validate, chunk-copy, and initialize a new video upload job.
 
         Returns (job_id, input_video_path, total_bytes).
         Cleans up partially written files and directories on any validation error.
         """
+        if counting_mode not in ("standard", "cross_check"):
+            raise ValueError("Unknown counting mode")
+
         # Validate filename and extract clean suffix
         display_name = Path(raw_filename).name if raw_filename else "video.mp4"
         suffix = Path(display_name).suffix.lower()
@@ -244,6 +249,7 @@ class JobManager:
                 "started_at": None,
                 "finished_at": None,
                 "original_filename": display_name,
+                "counting_mode": counting_mode,
                 "file_size_bytes": total_bytes,
                 "device": self.device,
                 "error": None,
@@ -349,6 +355,39 @@ class JobManager:
         """Execute gym_analyser CLI in a child process with explicit arguments."""
         if not model_path.is_file():
             raise FileNotFoundError("Configured pretrained checkpoint is missing; automatic download disabled")
+        began = time.monotonic()
+        counting_check = None
+        meta = self.get_metadata(job_id) if is_valid_job_id(job_id) else None
+        if meta and meta.get("counting_mode") == "cross_check":
+            selection_path = log_path.parent / "counting_check.json"
+            candidate = gym_pose_dir / "models" / "yolo11s-pose.pt"
+            budget = timeout * .65
+            check_cmd = [str(self.analysis_python), "-m", "gym_analyser.pose_crosscheck",
+                         "--source", str(input_path), "--baseline", str(model_path),
+                         "--candidate", str(candidate), "--mediapipe", str(gym_pose_dir / "models" / "mediapipe_pose_full.task"),
+                         "--output", str(selection_path), "--device", str(device), "--time-limit", str(budget)]
+            env = os.environ.copy()
+            paths = [gym_pose_dir, gym_pose_dir / ".venv_fault" / "Lib" / "site-packages",
+                     gym_pose_dir / ".venv_cuda" / "Lib" / "site-packages"]
+            env["PYTHONPATH"] = os.pathsep.join(str(p) for p in paths if p.is_dir())
+            env["PYTHONIOENCODING"] = "utf-8"
+            with open(log_path, "w", encoding="utf-8") as check_log:
+                checked = subprocess.run(check_cmd, stdin=subprocess.DEVNULL, stdout=check_log,
+                                         stderr=subprocess.STDOUT, cwd=str(gym_pose_dir), env=env,
+                                         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                                         timeout=budget, check=False)
+            if checked.returncode != 0 or not selection_path.is_file():
+                raise RuntimeError("Counting cross-check failed; inspect the local run log or retry standard mode")
+            counting_check = json.loads(selection_path.read_text(encoding="utf-8"))
+            selected = Path(counting_check["selected_model_path"]).resolve()
+            if selected not in {model_path.resolve(), candidate.resolve()}:
+                raise ValueError("Cross-check returned an unapproved model path")
+            if counting_check.get("status") not in ("corroborated", "needs_review"):
+                raise ValueError("Invalid counting cross-check status")
+            model_path = selected
+        remaining = timeout - (time.monotonic() - began)
+        if remaining <= 0:
+            raise TimeoutError("Total analysis time budget exceeded")
         cmd = [
             str(self.analysis_python),
             "-m",
@@ -364,7 +403,7 @@ class JobManager:
         ]
 
         exit_code = -1
-        with open(log_path, "w", encoding="utf-8") as log_file:
+        with open(log_path, "a" if counting_check else "w", encoding="utf-8") as log_file:
             proc = subprocess.Popen(
                 cmd,
                 stdin=subprocess.DEVNULL,
@@ -375,11 +414,11 @@ class JobManager:
                 shell=False,
             )
             try:
-                exit_code = proc.wait(timeout=timeout)
+                exit_code = proc.wait(timeout=remaining)
             except subprocess.TimeoutExpired:
                 proc.kill()
-                proc.wait()
-                raise TimeoutError(f"Subprocess exceeded timeout of {timeout}s")
+                proc.wait(timeout=10)
+                raise TimeoutError(f"Subprocess exceeded total analysis budget of {timeout}s")
 
         # Inspect generated summary.json
         summary_path = results_dir / "summary.json"
@@ -389,6 +428,15 @@ class JobManager:
             try:
                 with open(summary_path, "r", encoding="utf-8") as sf:
                     summary = json.load(sf)
+                if counting_check is not None:
+                    if summary.get("completed_reps") != counting_check.get("selected_count"):
+                        counting_check["status"] = "needs_review"
+                        counting_check["note"] = "The final run differs from the cross-check estimate. Review the video before using this count."
+                    summary["counting_check"] = counting_check
+                    summary_path.write_text(json.dumps(summary, indent=2, allow_nan=False), encoding="utf-8")
+                    (results_dir / "counting_check.json").write_text(json.dumps(counting_check, indent=2, allow_nan=False), encoding="utf-8")
+                    outcome["counting_check_status"] = counting_check["status"]
+                    outcome["counting_check_note"] = counting_check["note"]
                 reported_status = summary.get("status")
                 if reported_status == "completed" and exit_code == 0:
                     outcome["status"] = STATUS_COMPLETED

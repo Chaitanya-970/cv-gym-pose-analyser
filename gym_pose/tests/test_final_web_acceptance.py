@@ -799,8 +799,10 @@ class TestRealSavedPersonalVideoArtifacts(unittest.TestCase):
         self.assertFalse(data["available_artifacts"]["knee_review.json"]["available"])
         self.assertFalse(data["available_artifacts"]["back_review.json"]["available"])
         self.assertFalse(data["available_artifacts"]["teng_review.json"]["available"])
+        self.assertFalse(data["available_artifacts"]["counting_check.json"]["available"])
+        self.assertEqual(self.client.get(f"/api/jobs/{self.job_id}/download/counting_check.json").status_code, 404)
         for name, art_info in data["available_artifacts"].items():
-            if name in {"heel_review.json", "knee_review.json", "back_review.json", "teng_review.json"}:
+            if name in {"heel_review.json", "knee_review.json", "back_review.json", "teng_review.json", "counting_check.json"}:
                 self.assertEqual(art_info["size_bytes"], 0)
                 continue
             self.assertTrue(art_info["available"], f"Artifact {name} must be available on disk")

@@ -1185,5 +1185,18 @@ class TestCoachingFeedback(unittest.TestCase):
         self.assertIsNone(rep1["measurements"]["median_hip_angle_deg"])
 
 
+    def test_missing_or_invalid_depth_configuration_is_not_invented(self):
+        for value in (None, {}, {"down_angle": None}, {"down_angle": True},
+                      {"down_angle": float("nan")}, {"down_angle": -1}, {"down_angle": 190}):
+            with self.subTest(configuration=value):
+                fixture = self._build_synthetic_fixture()
+                fixture["summary"]["configuration"] = value
+                result = generate_coaching_feedback(**fixture)
+                messages = [ob["message"] for rep in result["per_repetition_cues"]
+                            for ob in rep["observations"] if ob["rule_id"] == "OBS-DEPTH-01"]
+                self.assertTrue(messages)
+                self.assertTrue(all("threshold is unavailable" in message for message in messages))
+                self.assertTrue(all("110.0" not in message for message in messages))
+
 if __name__ == "__main__":
     unittest.main()

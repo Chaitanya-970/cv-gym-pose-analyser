@@ -40,14 +40,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--down-angle",
         type=float,
-        default=110.0,
-        help="Knee flexion down threshold in degrees (default: 110.0).",
+        default=CounterConfig().down_angle,
+        help="Legacy internal knee-angle gate (straight=180; default: 110). Not a validated full-squat definition.",
     )
     parser.add_argument(
         "--up-angle",
         type=float,
-        default=150.0,
-        help="Knee extension up threshold in degrees (default: 150.0).",
+        default=CounterConfig().up_angle,
+        help="Internal knee-angle standing gate (default: 150). Software hysteresis, not a clinical extension standard.",
     )
     parser.add_argument(
         "--min-confidence",

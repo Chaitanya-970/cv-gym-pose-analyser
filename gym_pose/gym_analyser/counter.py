@@ -5,14 +5,15 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from .geometry import evaluate_leg
+from .angle_policy import LEGACY_DOWN_ANGLE_DEG, STANDING_GATE_DEG
 
 
 @dataclass(frozen=True)
 class CounterConfig:
     """Configuration settings for squat analysis."""
 
-    down_angle: float = 110.0
-    up_angle: float = 150.0
+    down_angle: float = LEGACY_DOWN_ANGLE_DEG
+    up_angle: float = STANDING_GATE_DEG
     min_joint_confidence: float = 0.3
     stable_frames: int = 3
     max_gap_seconds: float = 0.5

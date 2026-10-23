@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from .counter import CounterConfig, FrameResult, SquatCounter
+from .angle_policy import describe_angle_policy
 from .attempts import AttemptTracker
 from .feedback_observations import build_feedback_observations
 from .phase_feedback import build_phase_feedback
@@ -534,6 +535,7 @@ def run_pipeline(
                 "ultralytics": ultralytics.__version__ if "ultralytics" in sys.modules else "unknown",
                 "opencv": cv2.__version__,
             },
+            "angle_policy": describe_angle_policy(config.down_angle, config.up_angle),
             "configuration": {
                 "down_angle": config.down_angle,
                 "up_angle": config.up_angle,

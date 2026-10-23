@@ -20,19 +20,21 @@ Strict Epistemological Boundaries:
 """
 
 import math
+from gym_analyser.angle_policy import (DEPTH_REVIEW_DIFFERENCE_DEG, TORSO_REVIEW_DIFFERENCE_DEG, TURNAROUND_REVIEW_DIFFERENCE_DEG)
 from numbers import Real
 import statistics
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Set, Tuple, Union
 
 CSV_PRECISION_DECIMALS = 2
 
-# Thresholds conforming to POSTURE_CRITIQUE_CONTRACT_59.md
+# Engineering attention filters, not research-derived fault limits or measurement error bounds.
+# See ANGLE_BASELINES.md for the research audit and angle convention.
 MIN_COMPARABLE_COVERAGE_PCT = 50.0
-DEPTH_CONSISTENCY_VARIANCE_DEG = 5.0
+DEPTH_CONSISTENCY_VARIANCE_DEG = DEPTH_REVIEW_DIFFERENCE_DEG
 RAPID_DESCENT_THRESHOLD_S = 0.60
 ASYMMETRIC_PACING_RATIO = 2.5
 MARKED_TEMPO_DRIFT_THRESHOLD_S = 0.25
-NOTICEABLE_TORSO_DEVIATION_DEG = 3.0
+NOTICEABLE_TORSO_DEVIATION_DEG = TORSO_REVIEW_DIFFERENCE_DEG
 
 CLINICAL_DISCLAIMER = (
     "These 2D kinematic measurements are descriptive planar observations, "
@@ -340,7 +342,7 @@ def determine_unavailability_reason(
 def build_depth_observation(
     rep: RepetitionEvidence,
     all_reps: Sequence[RepetitionEvidence],
-    configured_down_angle: float,
+    configured_down_angle: Optional[float],
     summary_status: str,
     feedback_phases_available: bool,
     phase_ev_present: bool,
@@ -349,8 +351,11 @@ def build_depth_observation(
     """Build OBS-DEPTH-01 observation with within-session progression and evidence links."""
     if rep.has_verified_phase and rep.min_knee_angle_deg is not None and rep.inflection_time_s is not None:
         min_knee = rep.min_knee_angle_deg
-        depth_diff = round(min_knee - configured_down_angle, CSV_PRECISION_DECIMALS)
-        if depth_diff <= 0:
+        depth_diff = None if configured_down_angle is None else round(min_knee - configured_down_angle, CSV_PRECISION_DECIMALS)
+        if depth_diff is None:
+            base_msg = (f"Observed minimum knee angle reached {min_knee:.2f}°. "
+                        "The configured depth threshold is unavailable; no threshold comparison is made.")
+        elif depth_diff <= 0:
             base_msg = (
                 f"Observed minimum knee angle reached {min_knee:.2f}° (turnaround point), "
                 f"crossing the configured {configured_down_angle:.1f}° depth threshold."
@@ -759,7 +764,7 @@ def build_evidence_linked_suggestions(
         r_prev_d = prior_comp_depth[-1]
         if r_prev_d.min_knee_angle_deg is not None:
             d_shift = round(rep.min_knee_angle_deg - r_prev_d.min_knee_angle_deg, CSV_PRECISION_DECIMALS)
-            if abs(d_shift) >= 2.0:
+            if abs(d_shift) >= TURNAROUND_REVIEW_DIFFERENCE_DEG:
                 p_id = r_prev_d.attempt_id if r_prev_d.attempt_id is not None else r_prev_d.rep_index
                 sign_d = f"+{d_shift:.2f}°" if d_shift >= 0 else f"{d_shift:.2f}°"
                 focus_cues.append(f"turnaround depth shift ({sign_d} vs cycle {p_id})")
@@ -1199,10 +1204,10 @@ def generate_coaching_feedback(
                 seen_counted_aids.add(aid)
             counted_events.append(ev)
 
-    configured_down_angle = 110.0
+    configured_down_angle = None
     if isinstance(summary.get("configuration"), (dict, Mapping)):
         c_down = _parse_float(summary["configuration"].get("down_angle"))
-        if c_down is not None:
+        if c_down is not None and 0.0 < c_down < 180.0:
             configured_down_angle = c_down
 
     summary_status = str(summary.get("status", "")).strip().lower() if isinstance(summary, (dict, Mapping)) else ""

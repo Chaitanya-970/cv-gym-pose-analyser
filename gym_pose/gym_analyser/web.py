@@ -23,13 +23,14 @@ from typing import Any, Dict, Optional, Union
 
 # Deferred framework imports to permit clean module inspection
 try:
-    from fastapi import BackgroundTasks, FastAPI, File, HTTPException, UploadFile, status
+    from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile, status
     from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 except ImportError:
     # Optional dependency: will be available when requirements-web.txt is installed
     FastAPI = None
     BackgroundTasks = None
     File = None
+    Form = None
     HTTPException = None
     UploadFile = None
     status = None
@@ -469,6 +470,8 @@ INDEX_HTML = """<html lang="en">
           <label for="video-input" class="file-label" id="file-label">Click to select video file (or drag & drop here)</label>
           <div class="selected-filename" id="file-name-display" aria-live="polite">No file selected (Max 200MB: MP4, MOV, AVI, MKV, WebM, M4V)</div>
         </div>
+        <label class="calibration-check" for="counting-cross-check"><input id="counting-cross-check" type="checkbox" checked aria-describedby="counting-mode-help"> Cross-check counting (slower)</label>
+        <p id="counting-mode-help" class="media-caption">Compare complete movement cycles using multiple pose estimators. This can take a few minutes. Disagreement is flagged for video review. These estimates do not grade technique.</p>
         <button type="submit" class="btn" id="submit-btn" disabled>Analyze Video</button>
       </form>
       <div id="upload-error" class="alert-box alert-danger hidden" role="alert" aria-live="assertive"></div>
@@ -490,6 +493,7 @@ INDEX_HTML = """<html lang="en">
     <div class="card hidden" id="results-card" role="region" aria-label="Analysis Results">
       <h2 id="results-title">Analysis Results</h2>
       <div id="results-announcement" class="sr-only" role="status" aria-live="polite"></div>
+      <p id="counting-check-note" class="media-caption hidden" role="status"></p>
 
       <div class="metrics-grid">
         <div class="metric-card">
@@ -605,6 +609,7 @@ INDEX_HTML = """<html lang="en">
     const MAX_UPLOAD_BYTES = 200 * 1024 * 1024;
     const ALLOWED_EXTENSIONS = ['.mp4', '.mov', '.avi', '.mkv', '.webm', '.m4v'];
     const ALLOWED_ARTIFACT_NAMES = [
+      'counting_check.json',
       'summary.json',
       'attempts.json',
       'posture_summary.json',
@@ -891,6 +896,8 @@ INDEX_HTML = """<html lang="en">
 
       const formData = new FormData();
       formData.append('file', fileToUpload);
+      const countingChoice = document.getElementById('counting-cross-check');
+      formData.append('counting_mode', countingChoice && countingChoice.checked ? 'cross_check' : 'standard');
 
       try {
         const res = await fetch('/api/jobs', {
@@ -1123,6 +1130,12 @@ INDEX_HTML = """<html lang="en">
       // disagreement is a warning, not permission to choose a positive count.
       const repsVal = data.completed_reps != null ? String(data.completed_reps) : 'Unavailable';
       metricReps.textContent = repsVal;
+      const countingNote = document.getElementById('counting-check-note');
+      if (countingNote) {
+        const check = data.summary && data.summary.counting_check;
+        countingNote.textContent = check ? check.note : '';
+        countingNote.classList.toggle('hidden', !check);
+      }
       metricFrames.textContent = data.processed_frames != null ? String(data.processed_frames) : '0';
       metricAttempts.textContent = String(attemptsList.length);
 
@@ -1836,6 +1849,12 @@ def create_app(
     async def index() -> HTMLResponse:
         """Serve the self-contained single-page web interface."""
         html = INDEX_HTML
+        optional_assets = [job_manager.model_path, job_manager.gym_pose_dir / "models" / "yolo11s-pose.pt",
+                           job_manager.gym_pose_dir / "models" / "mediapipe_pose_full.task"]
+        if not all(path.is_file() for path in optional_assets):
+            html = html.replace('id="counting-cross-check" type="checkbox" checked', 'id="counting-cross-check" type="checkbox" disabled')
+            html = html.replace('Compare complete movement cycles using multiple pose estimators. This can take a few minutes. Disagreement is flagged for video review. These estimates do not grade technique.',
+                                'Cross-checking is not installed on this setup. Standard counting remains available. These estimates do not grade technique.')
         if not enable_review:
             import re
             html = re.sub(r'<nav[^>]*class="review-nav".*?</nav>', "", html, count=1, flags=re.DOTALL)
@@ -1854,6 +1873,7 @@ def create_app(
     async def submit_job(
         background_tasks: BackgroundTasks,
         file: UploadFile = File(...),
+        counting_mode: str = Form("standard"),
     ) -> JSONResponse:
         """Upload video file and enqueue bounded single-worker analysis job.
 
@@ -1884,6 +1904,7 @@ def create_app(
             job_id, _target_path, total_bytes = job_manager.save_upload_file(
                 file_obj=file.file,
                 raw_filename=raw_filename,
+                counting_mode=counting_mode,
             )
         except ValueError as ve:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(ve))
