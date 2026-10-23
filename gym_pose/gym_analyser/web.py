@@ -511,15 +511,25 @@ INDEX_HTML = """<html lang="en">
         </div>
       </div>
 
+      <!-- Annotated video immediately follows result statistics. -->
+        <div class="media-box" id="video-box">
+          <h3>Annotated Video Output</h3>
+          <div class="video-player-container" id="preview-player">
+            <video id="annotated-video" controls preload="metadata" aria-label="Squat analysis preview video">
+              <source id="video-source" src="" type="video/mp4">
+              Your browser does not support HTML5 video playback.
+            </video>
+            <div id="video-review-context" class="notice-box" role="status" aria-live="polite" hidden></div>
+            <div id="video-seek-status" class="sr-only" role="status" aria-live="polite"></div>
+          </div>
+          <div id="video-fallback-notice" class="notice-box" style="margin-top: 8px;">
+            <strong>Browser Playback Notice:</strong> Video preview is rendered in OpenCV mp4v format. Some web browsers require H.264 streams and may display a blank player. If playback does not start, use the download links below to view the video in VLC or your local media player.
+          </div>
+        </div>
+
       <!-- Incomplete Warning if Applicable -->
       <div id="incomplete-note-box" class="alert-box alert-warning hidden" role="alert" aria-live="polite">
         <strong>Incomplete Processing Warning:</strong> <span id="incomplete-note-text"></span>
-      </div>
-
-      <div style="margin-top: 16px;">
-        <h3>Movement observations</h3>
-        <p style="font-size: 0.82rem; color: var(--text-muted);">Comparisons describe measured counted cycles in this video. They do not grade technique or establish safety.</p>
-        <div id="session-observations"></div>
       </div>
 
       <!-- Coaching Feedback Card -->
@@ -535,11 +545,6 @@ INDEX_HTML = """<html lang="en">
         </div>
 
         <div id="coaching-feedback-content">
-          <div id="coaching-quality-box" style="margin-bottom: 12px; font-size: 0.85rem;">
-            <strong>Recording Quality Assessment:</strong>
-            <div id="coaching-quality-details" style="color: var(--text-muted); margin-top: 4px;"></div>
-          </div>
-
           <div id="coaching-cues-box" style="margin-bottom: 12px;">
             <strong style="font-size: 0.88rem;">Per-Repetition Pacing &amp; Depth Cues:</strong>
             <div id="coaching-cues-list" style="margin-top: 6px; display: flex; flex-direction: column; gap: 8px;"></div>
@@ -580,22 +585,9 @@ INDEX_HTML = """<html lang="en">
         <div class="media-box" id="plot-box">
           <h3>Knee Flexion Angle Time Series</h3>
           <img id="angle-plot-img" src="" alt="Knee Angle Time Series Plot">
-          <div class="media-caption">Knee angle trajectory with configured up (extension) and down (inflection) thresholds.</div>
+          <div class="media-caption">Estimated hip-knee-ankle angle over time: a straight leg is near 180 degrees. Dashed lines are counting thresholds, not form standards. Gaps mean tracking was unavailable.</div>
         </div>
 
-        <div class="media-box" id="video-box">
-          <h3>Annotated Video Output</h3>
-          <div class="video-player-container" id="preview-player">
-            <video id="annotated-video" controls preload="metadata" aria-label="Squat analysis preview video">
-              <source id="video-source" src="" type="video/mp4">
-              Your browser does not support HTML5 video playback.
-            </video>
-            <div id="video-seek-status" class="sr-only" role="status" aria-live="polite"></div>
-          </div>
-          <div id="video-fallback-notice" class="notice-box" style="margin-top: 8px;">
-            <strong>Browser Playback Notice:</strong> Video preview is rendered in OpenCV mp4v format. Some web browsers require H.264 streams and may display a blank player. If playback does not start, use the download links below to view the video in VLC or your local media player.
-          </div>
-        </div>
       </div>
 
       <!-- Downloadable Artifacts -->
@@ -758,6 +750,12 @@ INDEX_HTML = """<html lang="en">
         announceSeekStatus('Video player is not available on this page.');
         return;
       }
+
+      // A timestamp click is an inspection action: reveal the paused player.
+      if (typeof annotatedVideo.pause === 'function') annotatedVideo.pause();
+      const reviewContext = document.getElementById('video-review-context');
+      if (reviewContext) { reviewContext.hidden = false; reviewContext.textContent = 'Selected review time: ' + t.toFixed(2) + ' seconds.'; }
+      if (typeof annotatedVideo.scrollIntoView === 'function') annotatedVideo.scrollIntoView({block: 'center', behavior: 'auto'});
 
       const applySeek = () => {
         let maxDur = null;
@@ -939,7 +937,10 @@ INDEX_HTML = """<html lang="en">
         startJobTracking(currentJobId, data.filename || fileToUpload.name);
         isSubmitting = false;
       } catch (err) {
-        uploadError.textContent = err.message || 'Network error during video upload. Please check your connection and retry.';
+        const networkFailure = err instanceof TypeError || /failed to fetch|networkerror|network request failed/i.test(String(err.message || ''));
+        uploadError.textContent = networkFailure
+          ? 'Cannot reach the local analyser. Start the local server, refresh this page, then select your video again.'
+          : (err.message || 'Video upload failed. Please retry.');
         uploadError.classList.remove('hidden');
         isSubmitting = false;
         submitBtn.disabled = false;
@@ -955,6 +956,8 @@ INDEX_HTML = """<html lang="en">
       clearPendingSeek();
       currentJobId = jobId;
       activeVideoDuration = null;
+      const reviewContext = document.getElementById('video-review-context');
+      if (reviewContext) { reviewContext.hidden = true; reviewContext.textContent = ''; }
 
       if (annotatedVideo) {
         try { annotatedVideo.pause(); } catch (_) {}
@@ -1178,6 +1181,7 @@ INDEX_HTML = """<html lang="en">
       const feedback = data.feedback_observations || {};
       const feedbackSummary = feedback.summary || {};
       const sessionContainer = document.getElementById('session-observations');
+      if (sessionContainer) {
       sessionContainer.textContent = '';
       const sessionTexts = [...(feedbackSummary.session_observations || [])];
       (feedbackSummary.comparisons || []).forEach(group => {
@@ -1211,6 +1215,7 @@ INDEX_HTML = """<html lang="en">
           limBox.appendChild(lp);
         });
         sessionContainer.appendChild(limBox);
+      }
       }
       const feedbackMap = {};
       (feedback.attempts || []).forEach(event => { feedbackMap[event.attempt_id] = event; });

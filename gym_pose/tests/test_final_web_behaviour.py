@@ -381,7 +381,7 @@ class TestUnavailableTelemetryAndCues(unittest.TestCase):
         self.assertIn('id="coaching-status-badge"', INDEX_HTML)
         self.assertIn('id="coaching-clinical-disclaimer"', INDEX_HTML)
         self.assertIn('id="coaching-validation-status"', INDEX_HTML)
-        self.assertIn('id="coaching-quality-details"', INDEX_HTML)
+        self.assertNotIn('id="coaching-quality-details"', INDEX_HTML)
         self.assertIn('id="coaching-cues-list"', INDEX_HTML)
         self.assertIn('id="coaching-uncounted-list"', INDEX_HTML)
 

@@ -24,7 +24,7 @@ class TestTengWeb(unittest.TestCase):
  def test_failure_preserves_count_job(self):
   self.called.side_effect=RuntimeError('missing model');self.client.post(f'/api/jobs/{self.job}/teng-review',json=BODY);self.assertEqual(self.client.get(f'/api/jobs/{self.job}/teng-review').json()['status'],'failed');self.assertFalse(self.manager.is_busy());self.assertEqual(self.manager.get_metadata(self.job)['status'],'completed')
  def test_no_claim_of_fault_probability_or_reference(self):
-  self.assertIn('Teng-trained back and heel review',INDEX_HTML);self.assertIn('not fault probabilities',INDEX_HTML);self.assertIn('teng_review.json',INDEX_HTML);self.assertNotIn("getElementById('teng-start')",INDEX_HTML);self.assertNotIn("getElementById('teng-flat')",INDEX_HTML);self.assertIn('teng_back_image_match',INDEX_HTML)
+  self.assertIn('Teng-trained back and heel review',INDEX_HTML);self.assertIn('not fault probabilities',INDEX_HTML);self.assertIn('teng_review.json',INDEX_HTML);self.assertNotIn("getElementById('teng-start')",INDEX_HTML);self.assertNotIn("getElementById('teng-flat')",INDEX_HTML);self.assertIn('Back suggestions',INDEX_HTML)
 class TestCandidate(unittest.TestCase):
  def test_logit_and_dimension(self):
   c=dict(weights=[1.,-1.],mean=[0.,0.],std=[1.,1.],bias=0.,threshold=.5);self.assertEqual(probability([1.,1.],c),.5)

@@ -4,6 +4,7 @@ HTML = """
         <h3 id="heel-review-title">Experimental heel-lift review</h3>
         <p>Review flags only: accuracy is not established across different people or recordings. This does not grade safe or unsafe form.</p>
         <p>Choose 0.4 to 5 seconds of the video where you are standing still and both heels are flat and visible. Use the video above or below to check the times.</p>
+        <p>Enter times in seconds, not angles. This interval selects a standing reference; the review then scans the video, not just that interval.</p>
         <form id="heel-review-form">
           <label>Reference start (seconds) <input id="heel-start" type="number" min="0" max="1200" step="0.1" required style="max-width:110px" aria-label="Flat-foot reference start in seconds"></label>
           <label>Reference end (seconds) <input id="heel-end" type="number" min="0" max="1200" step="0.1" required style="max-width:110px" aria-label="Flat-foot reference end in seconds"></label>

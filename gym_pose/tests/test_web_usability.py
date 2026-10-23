@@ -144,7 +144,6 @@ class TestAccessibilityAndMarkup(unittest.TestCase):
             "metric-frames",
             "incomplete-note-box",
             "incomplete-note-text",
-            "session-observations",
             "attempts-table",
             "attempts-tbody",
             "plot-box",

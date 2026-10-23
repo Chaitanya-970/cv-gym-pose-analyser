@@ -74,6 +74,16 @@ CSS = '''
       .file-input-wrapper { min-height: 150px; padding: 22px 12px; }
       .btn { width: 100%; }
     }
+    #teng-events { display: grid; gap: 18px; margin: 14px 0; }
+    #teng-events h4 { margin-bottom: 8px; font-size: 15px; }
+    .teng-suggestion-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: 10px; }
+    .teng-suggestion { padding: 12px; border: 1px solid var(--card-border); border-radius: 7px; background: #fafbf9; }
+    .teng-suggestion .btn-seek { width: 100%; }
+    .teng-suggestion p { font-size: 13px; color: var(--text-muted); margin-top: 7px; }
+    .teng-suggestion .btn-seek[aria-pressed=true] { background: #e3ece3; color: #244538; border-color: #31594a; font-weight: 600; }
+    .advanced-reviews > summary, #teng-review-card summary { cursor: pointer; min-height: 44px; padding: 10px 0; font-weight: 600; }
+    #video-review-context[hidden] { display: none; }
+    #video-review-context { margin-top: 10px; }
     @media (prefers-reduced-motion: reduce) {
       *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
     }
